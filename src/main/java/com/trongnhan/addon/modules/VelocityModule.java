@@ -20,26 +20,28 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 
 public class VelocityModule extends Module {
+    public enum Mode { Normal, Walls, Cancel, Grim }
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgAntiPush = settings.createGroup("AntiPush");
 
-    public final Setting<String> mode = sgGeneral.add(new EnumSetting.Builder<String>()
+    public final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>()
         .name("Mode").description("The method used to modify knockback.")
-        .defaultValue("Cancel").values("Normal", "Walls", "Cancel", "Grim").build());
+        .defaultValue(Mode.Cancel).build());
 
     public final Setting<Integer> horizontal = sgGeneral.add(new IntSetting.Builder()
         .name("Horizontal").description("Horizontal knockback received.")
         .defaultValue(0).min(0).max(100)
-        .visible(() -> mode.get().equals("Normal") || mode.get().equals("Walls")).build());
+        .visible(() -> mode.get() == Mode.Normal || mode.get() == Mode.Walls).build());
 
     public final Setting<Integer> vertical = sgGeneral.add(new IntSetting.Builder()
         .name("Vertical").description("Vertical knockback received.")
         .defaultValue(0).min(0).max(100)
-        .visible(() -> mode.get().equals("Normal") || mode.get().equals("Walls")).build());
+        .visible(() -> mode.get() == Mode.Normal || mode.get() == Mode.Walls).build());
 
     public final Setting<Boolean> onlyOnGround = sgGeneral.add(new BoolSetting.Builder()
         .name("OnlyOnGround").description("Only reduces knockback while phased AND on ground.")
-        .defaultValue(false).visible(() -> mode.get().equals("Walls")).build());
+        .defaultValue(false).visible(() -> mode.get() == Mode.Walls).build());
 
     public final Setting<Boolean> explosions = sgGeneral.add(new BoolSetting.Builder()
         .name("Explosions").description("Modifies explosion knockback.")
@@ -47,15 +49,15 @@ public class VelocityModule extends Module {
 
     public final Setting<Boolean> pause = sgGeneral.add(new BoolSetting.Builder()
         .name("Pause").description("Pauses velocity after rubberband.")
-        .defaultValue(true).visible(() -> mode.get().equals("Cancel") || mode.get().equals("Grim")).build());
+        .defaultValue(true).visible(() -> mode.get() == Mode.Cancel || mode.get() == Mode.Grim).build());
 
     public final Setting<Boolean> onlyPhased = sgGeneral.add(new BoolSetting.Builder()
         .name("OnlyPhased").description("Only reduces knockback while phased.")
-        .defaultValue(false).visible(() -> mode.get().equals("Grim")).build());
+        .defaultValue(false).visible(() -> mode.get() == Mode.Grim).build());
 
     public final Setting<Boolean> onlyWhenHeadCovered = sgGeneral.add(new BoolSetting.Builder()
         .name("OnlyCoveredHead").description("Only reduces knockback when head is covered.")
-        .defaultValue(false).visible(() -> mode.get().equals("Grim")).build());
+        .defaultValue(false).visible(() -> mode.get() == Mode.Grim).build());
 
     public final Setting<Double> fallDistance = sgGeneral.add(new DoubleSetting.Builder()
         .name("FallDistance").description("Pause velocity if falling more than this distance.")
@@ -107,7 +109,7 @@ public class VelocityModule extends Module {
 
     @Override
     public void onDeactivate() {
-        if (pendingVelocity && mode.get().equalsIgnoreCase("Grim")) {
+        if (pendingVelocity && mode.get() == Mode.Grim) {
             sendRotationFix();
         }
         pendingVelocity = false;
@@ -117,7 +119,7 @@ public class VelocityModule extends Module {
     @EventHandler
     private void onTick(TickEvent.Post event) {
         if (mc.player == null) return;
-        if (pendingVelocity && mode.get().equalsIgnoreCase("Grim")) {
+        if (pendingVelocity && mode.get() == Mode.Grim) {
             sendRotationFix();
         }
         pendingVelocity = false;
@@ -131,7 +133,7 @@ public class VelocityModule extends Module {
         float f2 = MathHelper.clamp(pitch + f, -90.0f, 90.0f);
         
         if (mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, f2, mc.player.isOnGround()));
+            mc.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, f2, mc.player.isOnGround(), mc.player.horizontalCollision));
         }
     }
 
@@ -146,9 +148,9 @@ public class VelocityModule extends Module {
         }
 
         if (event.packet instanceof EntityVelocityUpdateS2CPacket packet) {
-            if (packet.getId() != mc.player.getId()) return;
+            if (packet.getEntityId() != mc.player.getId()) return;
 
-            Vec3d movement = new Vec3d(packet.getVelocityX(), packet.getVelocityY(), packet.getVelocityZ());
+            Vec3d movement = new Vec3d(packet.getVelocity().x, packet.getVelocity().y, packet.getVelocity().z);
             
             if (pendingConcealment && movement.x == 0.0 && movement.y == 0.0 && movement.z == 0.0) {
                 pendingConcealment = false;
@@ -156,16 +158,16 @@ public class VelocityModule extends Module {
             }
 
             switch (mode.get()) {
-                case "Normal" -> scaleVelocity(event, movement);
-                case "Walls" -> {
+                case Normal -> scaleVelocity(event, movement);
+                case Walls -> {
                     if (!isPhased(mc.player) || (onlyOnGround.get() && !mc.player.isOnGround())) return;
                     scaleVelocity(event, movement);
                 }
-                case "Cancel" -> {
+                case Cancel -> {
                     if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
                     event.cancel();
                 }
-                case "Grim" -> {
+                case Grim -> {
                     if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
                     if (onlyPhased.get() && !isPhased(mc.player)) return;
                     if (onlyWhenHeadCovered.get()) {
@@ -183,15 +185,15 @@ public class VelocityModule extends Module {
             Vec3d knockback = packet.getPlayerKnockback().orElse(Vec3d.ZERO);
             
             switch (mode.get()) {
-                case "Normal" -> scaleExplosion(packet, knockback);
-                case "Walls" -> {
+                case Normal -> scaleExplosion(packet, knockback);
+                case Walls -> {
                     if (isPhased(mc.player)) scaleExplosion(packet, knockback);
                 }
-                case "Cancel" -> {
+                case Cancel -> {
                     if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
                     event.cancel();
                 }
-                case "Grim" -> {
+                case Grim -> {
                     if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
                     if (onlyPhased.get() && !isPhased(mc.player)) return;
                     if (onlyWhenHeadCovered.get()) {
@@ -206,13 +208,15 @@ public class VelocityModule extends Module {
 
             if (event.isCancelled()) {
                 mc.execute(() -> {
-                    Vec3d center = packet.getX() != 0 ? new Vec3d(packet.getX(), packet.getY(), packet.getZ()) : mc.player.getPos();
+                    Vec3d center = new Vec3d(packet.getX(), packet.getY(), packet.getZ());
                     mc.world.playSound(
                         center.x, center.y, center.z,
                         packet.getExplosionSound().value(), SoundCategory.BLOCKS,
                         4.0F, (1.0F + (mc.world.random.nextFloat() - mc.world.random.nextFloat()) * 0.2F) * 0.7F, false
                     );
-                    mc.world.addParticle(packet.getAffectedBlocks().isEmpty() ? null : net.minecraft.particle.ParticleTypes.EXPLOSION, center.x, center.y, center.z, 1.0, 0.0, 0.0);
+                    if (mc.world != null) {
+                        mc.world.addParticle(net.minecraft.particle.ParticleTypes.EXPLOSION, center.x, center.y, center.z, 1.0, 0.0, 0.0);
+                    }
                 });
             }
         }
@@ -269,8 +273,8 @@ public class VelocityModule extends Module {
 
     @Override
     public String getInfoString() {
-        if (mode.get().equalsIgnoreCase("Cancel")) return "0%, 0%";
-        if (mode.get().equalsIgnoreCase("Grim")) return "Grim";
+        if (mode.get() == Mode.Cancel) return "0%, 0%";
+        if (mode.get() == Mode.Grim) return "Grim";
         return horizontal.get() + "%, " + vertical.get() + "%";
     }
 }
