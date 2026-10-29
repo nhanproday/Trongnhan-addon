@@ -8,28 +8,23 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.class_1657;
-import net.minecraft.class_1661;
-import net.minecraft.class_1703;
-import net.minecraft.class_1713;
-import net.minecraft.class_1735;
-import net.minecraft.class_1799;
-import net.minecraft.class_1802;
-import net.minecraft.class_310;
-import net.minecraft.class_437;
-import net.minecraft.class_490;
-import net.minecraft.class_746;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.screen.PlayerScreenHandler;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
+import net.minecraft.screen.slot.SlotActionType;
 import org.lwjgl.glfw.GLFW;
 
 public class MainhandModule extends Module {
 
     private enum Stage {
-        IDLE,
-        TAP,
-        OPEN,
-        OFFHAND,
-        HOTBAR,
-        CLOSE
+        IDLE, TAP, OPEN, OFFHAND, HOTBAR, CLOSE
     }
 
     private static final int HOTBAR_SIZE = 9;
@@ -70,10 +65,10 @@ public class MainhandModule extends Module {
 
     private int delayTimer;
     private Stage stage = Stage.IDLE;
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     public MainhandModule() {
-        super(TrongNhanAddon.CATEGORY, "mainhand",
-            "Tu refill totem offhand + hotbar");
+        super(TrongNhanAddon.CATEGORY, "mainhand", "Tu refill totem offhand + hotbar");
     }
 
     @Override
@@ -84,9 +79,8 @@ public class MainhandModule extends Module {
 
     @Override
     public void onDeactivate() {
-        class_310 mc = class_310.method_1551();
-        if (mc.field_1724 != null && mc.field_1755 instanceof class_490) {
-            mc.field_1724.method_1507(null);
+        if (mc.player != null && mc.currentScreen instanceof InventoryScreen) {
+            mc.player.closeHandledScreen();
         }
         stage = Stage.IDLE;
         delayTimer = 0;
@@ -94,8 +88,7 @@ public class MainhandModule extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        class_310 mc = class_310.method_1551();
-        class_746 player = mc.field_1724;
+        ClientPlayerEntity player = mc.player;
         if (player == null) return;
 
         if (delayTimer > 0) {
@@ -104,20 +97,20 @@ public class MainhandModule extends Module {
         }
 
         switch (stage) {
-            case IDLE    -> tickIdle(player, mc.field_1755);
+            case IDLE    -> tickIdle(player, mc.currentScreen);
             case TAP     -> tickTap(player);
-            case OPEN    -> tickOpen(player, mc.field_1755);
-            case OFFHAND -> tickOffhand(player, mc.field_1755);
+            case OPEN    -> tickOpen(player, mc.currentScreen);
+            case OFFHAND -> tickOffhand(player, mc.currentScreen);
             case HOTBAR  -> tickHotbar();
             case CLOSE   -> tickClose(player);
         }
     }
 
-    private void tickIdle(class_746 player, class_437 screen) {
+    private void tickIdle(ClientPlayerEntity player, Screen screen) {
         if (screen != null) return;
         if (countAllTotems(player) <= 0) return;
 
-        boolean offhandEmpty = !isTotem(player.method_6079());
+        boolean offhandEmpty = !isTotem(player.getOffHandStack());
         boolean hotbarNeedsRefill = findHotbarTotem(player) < 0;
         if (!offhandEmpty && !hotbarNeedsRefill) return;
 
@@ -126,7 +119,7 @@ public class MainhandModule extends Module {
         delayTimer = stepDelay.get();
     }
 
-    private void tickTap(class_746 player) {
+    private void tickTap(ClientPlayerEntity player) {
         if (!hasSpareTotem(player)) {
             stage = Stage.CLOSE;
             return;
@@ -135,22 +128,23 @@ public class MainhandModule extends Module {
         delayTimer = stepDelay.get();
     }
 
-    private void tickOpen(class_746 player, class_437 screen) {
+    private void tickOpen(ClientPlayerEntity player, Screen screen) {
         if (!silent.get()) {
-            if (!(screen instanceof class_490)) {
-                player.method_1507(screen);
+            if (!(screen instanceof InventoryScreen)) {
+                player.closeHandledScreen(); // Đảm bảo màn hình cũ đóng
+                mc.setScreen(new InventoryScreen(player));
             }
         }
         stage = Stage.OFFHAND;
         delayTimer = stepDelay.get();
     }
 
-    private void tickOffhand(class_746 player, class_437 screen) {
-        if (!silent.get() && !(screen instanceof class_490)) {
+    private void tickOffhand(ClientPlayerEntity player, Screen screen) {
+        if (!silent.get() && !(screen instanceof InventoryScreen)) {
             stage = Stage.IDLE;
             return;
         }
-        boolean offhandEmpty = !isTotem(player.method_6079());
+        boolean offhandEmpty = !isTotem(player.getOffHandStack());
         boolean hotbarNeedsRefill = findHotbarTotem(player) < 0;
         replenish(player, offhandEmpty, hotbarNeedsRefill);
         stage = Stage.HOTBAR;
@@ -162,91 +156,99 @@ public class MainhandModule extends Module {
         delayTimer = stepDelay.get();
     }
 
-    private void tickClose(class_746 player) {
+    private void tickClose(ClientPlayerEntity player) {
         if (!silent.get()) {
-            player.method_1507(null);
+            player.closeHandledScreen();
         }
         stage = Stage.IDLE;
         delayTimer = stepDelay.get();
     }
 
-    private static boolean isTotem(class_1799 stack) {
-        return stack != null && stack.method_31574(class_1802.field_8288);
+    private static boolean isTotem(ItemStack stack) {
+        return stack != null && stack.isOf(Items.TOTEM_OF_UNDYING);
     }
 
-    private int countAllTotems(class_746 player) {
-        class_1661 inv = player.method_31548();
+    private int countAllTotems(ClientPlayerEntity player) {
+        PlayerInventory inv = player.getInventory();
         int count = 0;
-        for (int i = 0; i < inv.method_5438(); i++) {
-            class_1799 stack = inv.method_5438(i);
-            if (isTotem(stack)) count += stack.method_7947();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (isTotem(stack)) count += stack.getCount();
         }
         return count;
     }
 
-    private int findHotbarTotem(class_746 player) {
-        class_1661 inv = player.method_31548();
+    private int findHotbarTotem(ClientPlayerEntity player) {
+        PlayerInventory inv = player.getInventory();
         for (int i = 0; i < HOTBAR_SIZE; i++) {
-            if (isTotem(inv.method_5438(i))) return i;
+            if (isTotem(inv.getStack(i))) return i;
         }
         return -1;
     }
 
-    private int findTotemInInventoryOnly(class_746 player) {
-        class_1661 inv = player.method_31548();
+    private int findTotemInInventoryOnly(ClientPlayerEntity player) {
+        PlayerInventory inv = player.getInventory();
         for (int i = MAIN_INV_START; i < MAIN_INV_END; i++) {
-            if (isTotem(inv.method_5438(i))) return i;
+            if (isTotem(inv.getStack(i))) return i;
         }
         return -1;
     }
 
-    private boolean hasSpareTotem(class_746 player) {
+    private boolean hasSpareTotem(ClientPlayerEntity player) {
         return findTotemInInventoryOnly(player) >= 0 || findHotbarTotem(player) >= 0;
     }
 
-    private boolean hotbarSlotHasTotem(class_746 player, int hotbarIdx) {
-        return isTotem(player.method_31548().method_5438(hotbarIdx));
+    private boolean hotbarSlotHasTotem(ClientPlayerEntity player, int hotbarIdx) {
+        return isTotem(player.getInventory().getStack(hotbarIdx));
     }
 
     private void simulatePhysicalTap(int slot) {
-        class_310 mc = class_310.method_1551();
-        class_746 player = mc.field_1724;
-        if (player == null || player.field_7498 == null) return;
-        int syncId = player.field_7498.field_7763;
-        player.field_7498.method_2906(syncId, slot, 40, class_1713.field_7791, player);
+        ClientPlayerEntity player = mc.player;
+        if (player == null || player.currentScreenHandler == null) return;
+        int syncId = player.currentScreenHandler.syncId;
+        mc.interactionManager.clickSlot(syncId, slot, 40, SlotActionType.SWAP, player);
     }
 
-    private void simulateMouseOverSlot(int slot) {
-        class_310 mc = class_310.method_1551();
-        if (!(mc.field_1755 instanceof class_490 inv) || inv.field_7763 == null) return;
-        class_1735 slotObj = inv.field_7763.method_7611(slot);
-        if (slotObj == null) return;
-        double scale = mc.method_22683().method_4490();
-        double mouseX = (inv.field_1755 + slotObj.field_7873) * scale;
-        double mouseY = (inv.field_1756 + slotObj.field_7872) * scale;
-        GLFW.glfwSetCursorPos(mc.method_22683().method_4480(), mouseX, mouseY);
+    private void simulateMouseOverSlot(int slotId) {
+        if (!(mc.currentScreen instanceof InventoryScreen inv)) return;
+        Slot slot = inv.getScreenHandler().getSlot(slotId);
+        if (slot == null) return;
+        
+        try {
+            java.lang.reflect.Field xField = net.minecraft.client.gui.screen.ingame.HandledScreen.class.getDeclaredField("x");
+            xField.setAccessible(true);
+            int screenX = xField.getInt(inv);
+            
+            java.lang.reflect.Field yField = net.minecraft.client.gui.screen.ingame.HandledScreen.class.getDeclaredField("y");
+            yField.setAccessible(true);
+            int screenY = yField.getInt(inv);
+
+            double scale = mc.getWindow().getScaleFactor();
+            double mouseX = (screenX + slot.x) * scale;
+            double mouseY = (screenY + slot.y) * scale;
+            GLFW.glfwSetCursorPos(mc.getWindow().getHandle(), mouseX, mouseY);
+        } catch (Exception ignored) {}
     }
 
     private void executeKeybindSwap(int fromSlot, int toSlot) {
-        class_310 mc = class_310.method_1551();
-        class_746 player = mc.field_1724;
-        if (player == null || player.field_7498 == null) return;
+        ClientPlayerEntity player = mc.player;
+        if (player == null || player.currentScreenHandler == null) return;
 
-        class_1703 handler;
+        ScreenHandler handler;
         if (silent.get()) {
-            handler = player.field_7498;
+            handler = player.currentScreenHandler;
         } else {
-            class_437 screen = mc.field_1755;
-            if (!(screen instanceof class_490 inv) || inv.field_7763 == null) return;
-            handler = inv.field_7763;
+            if (!(mc.currentScreen instanceof InventoryScreen inv)) return;
+            handler = inv.getScreenHandler();
         }
 
-        int syncId = handler.field_7763;
-        player.field_7498.method_2906(syncId, fromSlot, 0, class_1713.field_7791, player);
-        player.field_7498.method_2906(syncId, toSlot, 0, class_1713.field_7791, player);
+        int syncId = handler.syncId;
+        mc.interactionManager.clickSlot(syncId, fromSlot, 0, SlotActionType.PICKUP, player);
+        mc.interactionManager.clickSlot(syncId, toSlot, 0, SlotActionType.PICKUP, player);
+        mc.interactionManager.clickSlot(syncId, fromSlot, 0, SlotActionType.PICKUP, player);
     }
 
-    private void replenish(class_746 player, boolean offhandEmpty, boolean hotbarNeedsRefill) {
+    private void replenish(ClientPlayerEntity player, boolean offhandEmpty, boolean hotbarNeedsRefill) {
         if (offhandEmpty) {
             int src = findTotemInInventoryOnly(player);
             if (src >= 0) executeKeybindSwap(src, OFFHAND_CONTAINER_SLOT);
