@@ -8,36 +8,34 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
-import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
+import org.lwjgl.glfw.GLFW;
 
 public class MainhandModule extends Module {
 
-    public enum Stage { Idle, Step1_FindHotbar, Step2_Open, Step3_OffhandSwap, Step4_Close }
+    public enum Stage { Idle, Step1_Tap, Step2_Open, Step3_Offhand, Step4_Hotbar, Step5_Close }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgInv = settings.createGroup("Inventory Replenish");
 
-    public final Setting<Integer> actionDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("delay").description("Khoảng chờ (ticks) giữa các thao tác.")
+    public final Setting<Integer> targetHotbarSlot = sgGeneral.add(new IntSetting.Builder()
+        .name("hotbar-slot").description("Slot hotbar (1-9) cần refill totem")
+        .defaultValue(1).min(1).max(9).sliderMin(1).sliderMax(9).build());
+
+    public final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
+        .name("delay").description("Delay (ticks) giữa các bước.")
         .defaultValue(2).min(0).sliderMax(20).build());
 
     public final Setting<Boolean> silentMode = sgGeneral.add(new BoolSetting.Builder()
-        .name("silent-mode").description("Bật: swap ngầm qua packet. Tắt: mở balo click chuột.")
+        .name("silent-mode").description("Bật: ẩn balo. Tắt: mở balo.")
         .defaultValue(true).build());
-        
-    public final Setting<Integer> targetSlot = sgGeneral.add(new IntSetting.Builder()
-        .name("hotbar-slot").description("Ô hotbar ưu tiên chứa totem (1-9).")
-        .defaultValue(1).min(1).max(9).sliderMin(1).sliderMax(9).build());
 
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    
     private int delayTimer = 0;
     private Stage stage = Stage.Idle;
 
     public MainhandModule() {
-        super(TrongNhanAddon.CATEGORY, "mainhand", "Auto totem (PtAddon logic) + Elytra Mainhand Save.");
+        super(TrongNhanAddon.CATEGORY, "mainhand", "Tự refill totem offhand + hotbar — 5 bước, dừng an toàn khi hết totem");
     }
 
     @Override
@@ -62,93 +60,99 @@ public class MainhandModule extends Module {
             return;
         }
 
-        boolean offhandHasTotem = mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
-        boolean isElytraFlying = mc.player.isGliding();
-        int currentSlot = mc.player.getInventory().getSelectedSlot();
-
-        if (isElytraFlying && !offhandHasTotem && !mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
-            for (int i = 0; i <= 8; i++) {
-                if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
-                    mc.player.getInventory().setSelectedSlot(i);
-                    try {
-                        java.lang.reflect.Method m = net.minecraft.client.network.ClientPlayerInteractionManager.class.getDeclaredMethod("syncSelectedSlot");
-                        m.setAccessible(true);
-                        m.invoke(mc.interactionManager);
-                    } catch (Exception ignored) {}
-                    delayTimer = actionDelay.get();
-                    return;
-                }
-            }
+        int totalTotems = countAllTotems();
+        if (totalTotems == 0) {
+            stage = Stage.Idle;
+            return;
         }
 
-        int preferredSlot = targetSlot.get() - 1;
+        boolean offhandEmpty = !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+        int targetIdx = targetHotbarSlot.get() - 1;
+        boolean hotbarNeedsRefill = !mc.player.getInventory().getStack(targetIdx).isOf(Items.TOTEM_OF_UNDYING);
 
-        if (!offhandHasTotem) {
-            stage = Stage.Step1_FindHotbar;
-        } else if (!mc.player.getInventory().getStack(preferredSlot).isOf(Items.TOTEM_OF_UNDYING)) {
-            stage = Stage.Step1_FindHotbar; 
-        } else {
+        if (!offhandEmpty && !hotbarNeedsRefill) {
             stage = Stage.Idle;
+            return;
+        }
+
+        if (stage == Stage.Idle) {
+            stage = Stage.Step1_Tap;
         }
 
         switch (stage) {
-            case Step1_FindHotbar -> {
-                int hotbarTotem = -1;
-                for (int i = 0; i <= 8; i++) {
-                    if (i == currentSlot) continue;
-                    if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
-                        hotbarTotem = i;
-                        break;
-                    }
-                }
-
-                if (!offhandHasTotem && hotbarTotem != -1) {
-                    executeKeybindSwap(hotbarTotem);
-                    delayTimer = actionDelay.get();
+            case Step1_Tap -> {
+                int hotbarTotem = findHotbarTotem();
+                if (offhandEmpty && hotbarTotem != -1) {
+                    executeKeybindSwap(hotbarTotem, 40);
+                    delayTimer = delay.get();
                     stage = Stage.Idle;
                 } else {
-                    int invTotem = findTotemInInventoryOnly();
-                    if (invTotem != -1) {
-                        stage = Stage.Step2_Open;
-                        delayTimer = actionDelay.get();
-                    } else {
-                        stage = Stage.Idle;
-                    }
+                    stage = Stage.Step2_Open;
+                    delayTimer = delay.get();
                 }
             }
             case Step2_Open -> {
                 if (!silentMode.get()) {
                     mc.setScreen(new InventoryScreen(mc.player));
                 }
-                stage = Stage.Step3_OffhandSwap;
-                delayTimer = actionDelay.get();
+                stage = Stage.Step3_Offhand;
+                delayTimer = delay.get();
             }
-            case Step3_OffhandSwap -> {
-                int invTotem = findTotemInInventoryOnly();
-                if (invTotem != -1) {
-                    int targetIdx = targetSlot.get() - 1;
-                    
-                    if (silentMode.get()) {
-                        ScreenHandler handler = mc.player.currentScreenHandler;
-                        mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                            handler.syncId, handler.getRevision(), invTotem, targetIdx, SlotActionType.SWAP, 
-                            mc.player.getInventory().getStack(invTotem), new net.minecraft.screen.slot.SlotActionType[0]
-                        ));
-                    } else {
-                        mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, invTotem, targetIdx, SlotActionType.SWAP, mc.player);
+            case Step3_Offhand -> {
+                if (offhandEmpty) {
+                    int invTotem = findTotemInInventoryOnly();
+                    if (invTotem != -1) {
+                        if (silentMode.get()) {
+                            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, invTotem, 40, SlotActionType.SWAP, mc.player);
+                        } else {
+                            simulateMouseOverSlot(invTotem);
+                            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, invTotem, 40, SlotActionType.SWAP, mc.player);
+                        }
                     }
                 }
-                stage = Stage.Step4_Close;
-                delayTimer = actionDelay.get();
+                stage = Stage.Step4_Hotbar;
+                delayTimer = delay.get();
             }
-            case Step4_Close -> {
+            case Step4_Hotbar -> {
+                if (hotbarNeedsRefill) {
+                    int invTotem = findTotemInInventoryOnly();
+                    if (invTotem != -1) {
+                        if (silentMode.get()) {
+                            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, invTotem, targetIdx, SlotActionType.SWAP, mc.player);
+                        } else {
+                            simulateMouseOverSlot(invTotem);
+                            mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, invTotem, targetIdx, SlotActionType.SWAP, mc.player);
+                        }
+                    }
+                }
+                stage = Stage.Step5_Close;
+                delayTimer = delay.get();
+            }
+            case Step5_Close -> {
                 if (!silentMode.get() && mc.currentScreen instanceof InventoryScreen) {
                     mc.player.closeHandledScreen();
                 }
                 stage = Stage.Idle;
-                delayTimer = actionDelay.get();
+                delayTimer = delay.get();
             }
         }
+    }
+
+    private int countAllTotems() {
+        int count = 0;
+        for (int i = 0; i <= 35; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) count++;
+        }
+        return count;
+    }
+
+    private int findHotbarTotem() {
+        int currentSlot = mc.player.getInventory().getSelectedSlot();
+        for (int i = 0; i <= 8; i++) {
+            if (i == currentSlot) continue;
+            if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i;
+        }
+        return -1;
     }
 
     private int findTotemInInventoryOnly() {
@@ -158,8 +162,18 @@ public class MainhandModule extends Module {
         return -1;
     }
 
-    private void executeKeybindSwap(int hotbarSlot) {
+    private void simulateMouseOverSlot(int slotId) {
+        if (mc.currentScreen instanceof InventoryScreen invScreen) {
+            Slot slot = invScreen.getScreenHandler().slots.get(slotId);
+            double guiScale = mc.getWindow().getScaleFactor();
+            double mouseX = (invScreen.x + slot.x + 8) * guiScale;
+            double mouseY = (invScreen.y + slot.y + 8) * guiScale;
+            GLFW.glfwSetCursorPos(mc.getWindow().getHandle(), mouseX, mouseY);
+        }
+    }
+
+    private void executeKeybindSwap(int hotbarSlot, int offhandContainerSlot) {
         if (mc.player == null || mc.interactionManager == null) return;
-        mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, 36 + hotbarSlot, 40, SlotActionType.SWAP, mc.player);
+        mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, 36 + hotbarSlot, offhandContainerSlot, SlotActionType.SWAP, mc.player);
     }
 }
