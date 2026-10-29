@@ -6,11 +6,14 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.item.Items;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import org.lwjgl.glfw.GLFW;
+
+import java.lang.reflect.Field;
 
 public class MainhandModule extends Module {
 
@@ -164,11 +167,22 @@ public class MainhandModule extends Module {
 
     private void simulateMouseOverSlot(int slotId) {
         if (mc.currentScreen instanceof InventoryScreen invScreen) {
-            Slot slot = invScreen.getScreenHandler().slots.get(slotId);
-            double guiScale = mc.getWindow().getScaleFactor();
-            double mouseX = (invScreen.x + slot.x + 8) * guiScale;
-            double mouseY = (invScreen.y + slot.y + 8) * guiScale;
-            GLFW.glfwSetCursorPos(mc.getWindow().getHandle(), mouseX, mouseY);
+            try {
+                Slot slot = invScreen.getScreenHandler().slots.get(slotId);
+                
+                Field xField = HandledScreen.class.getDeclaredField("x");
+                xField.setAccessible(true);
+                int screenX = xField.getInt(invScreen);
+                
+                Field yField = HandledScreen.class.getDeclaredField("y");
+                yField.setAccessible(true);
+                int screenY = yField.getInt(invScreen);
+
+                double guiScale = mc.getWindow().getScaleFactor();
+                double mouseX = (screenX + slot.x + 8) * guiScale;
+                double mouseY = (screenY + slot.y + 8) * guiScale;
+                GLFW.glfwSetCursorPos(mc.getWindow().getHandle(), mouseX, mouseY);
+            } catch (Exception ignored) {}
         }
     }
 
