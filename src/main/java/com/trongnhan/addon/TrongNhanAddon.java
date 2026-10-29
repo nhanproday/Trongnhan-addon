@@ -1,9 +1,11 @@
 package com.trongnhan.addon;
 
 import com.mojang.logging.LogUtils;
+import com.trongnhan.addon.modules.AutoShopModule;
+import com.trongnhan.addon.modules.AutoTotemModule;
 import com.trongnhan.addon.modules.MainhandModule;
+import com.trongnhan.addon.modules.VelocityModule;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
-import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import org.slf4j.Logger;
@@ -15,7 +17,12 @@ public class TrongNhanAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         LOG.info("[TrongNhan] init");
+        
+        // Nạp 4 module vào
+        Modules.get().add(new AutoTotemModule());
         Modules.get().add(new MainhandModule());
+        Modules.get().add(new AutoShopModule());
+        Modules.get().add(new VelocityModule());
     }
 
     @Override
@@ -28,4 +35,3 @@ public class TrongNhanAddon extends MeteorAddon {
         return "com.trongnhan.addon";
     }
 }
-
