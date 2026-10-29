@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "trongnhan",
+  "version": "${version}",
+  "name": "TrongNhan",
+  "description": "Auto totem / gapple mainhand manager.",
+  "authors": ["TrongNhan"],
+  "environment": "client",
+  "entrypoints": {
+    "meteor": ["com.trongnhan.addon.TrongNhanAddon"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.11",
+    "meteor-client": "*"
+  }
+}
