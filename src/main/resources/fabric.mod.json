@@ -10,7 +10,7 @@
     "meteor": ["com.trongnhan.addon.TrongNhanAddon"]
   },
   "depends": {
-    "fabricloader": ">=0.16.0",
+    "fabricloader": ">=0.16.14",
     "minecraft": "~1.21.11",
     "meteor-client": "*"
   }
