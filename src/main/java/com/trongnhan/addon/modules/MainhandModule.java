@@ -7,10 +7,12 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Items;
 import net.minecraft.util.math.MathHelper;
 
+import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 
@@ -118,7 +120,12 @@ public class MainhandModule extends Module {
     }
 
     private void syncSelected() {
-        if (mc.interactionManager != null) mc.interactionManager.syncSelectedSlot();
+        if (mc.interactionManager == null) return;
+        try {
+            Method m = ClientPlayerInteractionManager.class.getDeclaredMethod("syncSelectedSlot");
+            m.setAccessible(true);
+            m.invoke(mc.interactionManager);
+        } catch (Exception ignored) {}
     }
 
     private void resetAfterPops(String reason) {
