@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.10-SNAPSHOT'
+    id 'fabric-loom' version '1.11-SNAPSHOT'
     id 'maven-publish'
 }
 
@@ -12,7 +12,7 @@ group = project.maven_group
 
 repositories {
     mavenLocal()
-    maven { name = 'meteor'; url = 'https://maven.meteordev.org/releases' }
+    maven { name = 'meteor';           url = 'https://maven.meteordev.org/releases' }
     maven { name = 'meteor-snapshots'; url = 'https://maven.meteordev.org/snapshots' }
     maven { url = 'https://jitpack.io' }
     mavenCentral()
