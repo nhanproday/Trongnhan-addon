@@ -8,7 +8,7 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.AbstractInventoryScreen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -165,7 +165,7 @@ public class AutoShopModule extends Module {
         ticks = 0;
 
         Screen currentScreen = mc.currentScreen;
-        boolean screenOpen = currentScreen instanceof AbstractInventoryScreen && !(currentScreen instanceof InventoryScreen);
+        boolean screenOpen = currentScreen instanceof HandledScreen && !(currentScreen instanceof InventoryScreen);
         if (silent.get() && silentSession) screenOpen = screenOpen || mc.player.currentScreenHandler != mc.player.playerScreenHandler;
 
         if (state != State.WAIT_SHOP && !screenOpen) {
@@ -316,7 +316,7 @@ public class AutoShopModule extends Module {
         Screen screen = mc.currentScreen;
         boolean ownedShop = state != State.IDLE && currentOrder != null;
         if (screen instanceof InventoryScreen) return true;
-        if (screen instanceof AbstractInventoryScreen) return !ownedShop;
+        if (screen instanceof HandledScreen) return !ownedShop;
         if (mc.player.currentScreenHandler != mc.player.playerScreenHandler) {
             return !(ownedShop && silent.get() && (silentSession || expectedReason != ResponseReason.NONE));
         }
