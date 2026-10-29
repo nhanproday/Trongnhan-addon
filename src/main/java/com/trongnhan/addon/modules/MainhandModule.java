@@ -25,13 +25,15 @@ public class MainhandModule extends Module {
         .name("Delay").description("Delay (ms) before refilling a totem to hotbar.")
         .defaultValue(0).min(0).max(2000).build());
 
-    public final Setting<String> refillMode = sgGeneral.add(new EnumSetting.Builder<String>()
+    public enum RefillMode { Immediate, AfterPops }
+
+    public final Setting<RefillMode> refillMode = sgGeneral.add(new EnumSetting.Builder<RefillMode>()
         .name("RefillMode").description("When to refill the configured hotbar slot.")
-        .defaultValue("Immediate").values("Immediate", "After Pops").build());
+        .defaultValue(RefillMode.Immediate).build());
 
     public final Setting<Integer> popsBeforeRefill = sgGeneral.add(new IntSetting.Builder()
         .name("PopsBeforeRefill").description("Confirmed main-hand Totem pops per inventory refill.")
-        .defaultValue(4).min(1).max(9).visible(() -> refillMode.get().equals("After Pops")).build());
+        .defaultValue(4).min(1).max(9).visible(() -> refillMode.get() == RefillMode.AfterPops).build());
 
     public final Setting<Boolean> useGapple = sgGeneral.add(new BoolSetting.Builder()
         .name("UseGapple").description("Switches to golden apple.")
@@ -79,7 +81,7 @@ public class MainhandModule extends Module {
     }
 
     private boolean afterPops() {
-        return refillMode.get().equals("After Pops");
+        return refillMode.get() == RefillMode.AfterPops;
     }
 
     private void resetAfterPops() {
