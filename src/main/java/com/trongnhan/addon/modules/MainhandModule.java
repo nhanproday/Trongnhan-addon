@@ -322,7 +322,7 @@ public class MainhandModule extends Module {
             double r2 = MathHelper.square(maceRange.get().floatValue());
             return mc.world.getPlayers().stream().anyMatch(p -> {
                 if (p == mc.player || p.isDead()) return false;
-                if (p.distanceToSqr(mc.player) > r2) return false;
+                if (p.squaredDistanceTo(mc.player) > r2) return false;
                 if (p.fallDistance < 1.5) return false;
                 return p.getMainHandStack().isOf(Items.MACE);
             });
