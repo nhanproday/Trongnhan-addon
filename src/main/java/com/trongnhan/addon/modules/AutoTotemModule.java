@@ -18,14 +18,16 @@ import net.minecraft.util.math.MathHelper;
 public class AutoTotemModule extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
-    public final Setting<String> item = sgGeneral.add(new EnumSetting.Builder<String>()
+    public enum ItemMode { Totem, Crystal, Gapple }
+
+    public final Setting<ItemMode> item = sgGeneral.add(new EnumSetting.Builder<ItemMode>()
         .name("Item").description("The item that will be placed in your offhand slot.")
-        .defaultValue("Totem").values("Totem", "Crystal", "Gapple").build());
+        .defaultValue(ItemMode.Totem).build());
 
     public final Setting<Integer> health = sgGeneral.add(new IntSetting.Builder()
         .name("Health").description("The health at which a totem will be prioritized.")
         .defaultValue(16).min(0).max(36)
-        .visible(() -> !item.get().equals("Totem")).build());
+        .visible(() -> item.get() != ItemMode.Totem).build());
 
     public final Setting<Boolean> elytraCheck = sgGeneral.add(new BoolSetting.Builder()
         .name("ElytraCheck").description("Prioritizes a totem whenever you're wearing an elytra.")
@@ -65,7 +67,7 @@ public class AutoTotemModule extends Module {
 
     public final Setting<Boolean> smartMine = sgGeneral.add(new BoolSetting.Builder()
         .name("SmartMine").description("Switches to a crystal whenever you start mining.")
-        .defaultValue(false).visible(() -> item.get().equals("Crystal")).build());
+        .defaultValue(false).visible(() -> item.get() == ItemMode.Crystal).build());
 
     public final Setting<Boolean> antiMace = sgGeneral.add(new BoolSetting.Builder()
         .name("AntiMace").description("Switches to a totem if a player is trying to smash attack you.")
@@ -172,8 +174,8 @@ public class AutoTotemModule extends Module {
         }
 
         switch (item.get()) {
-            case "Crystal": if (hasItem(Items.END_CRYSTAL)) return Items.END_CRYSTAL; break;
-            case "Gapple": if (hasGapple) return gappleItem; break;
+            case Crystal: if (hasItem(Items.END_CRYSTAL)) return Items.END_CRYSTAL; break;
+            case Gapple: if (hasGapple) return gappleItem; break;
             default: if (hasTotem) return Items.TOTEM_OF_UNDYING; break;
         }
 
