@@ -6,6 +6,7 @@
   "description": "Auto totem / gapple mainhand manager.",
   "authors": ["TrongNhan"],
   "environment": "client",
+  "accessWidener": "trongnhan.accesswidener",
   "entrypoints": {
     "meteor": ["com.trongnhan.addon.TrongNhanAddon"]
   },
