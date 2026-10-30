@@ -53,7 +53,7 @@ public class AutoTotemModule extends Module {
     private final Random random = new Random();
 
     public AutoTotemModule() {
-        super(TrongNhanAddon.CATEGORY, "auto-totem", "Auto totem (Health, Hotbar, Balo).");
+        super(TrongNhanAddon.CATEGORY, "auto-totem--", "Auto totem (Health, Hotbar, Balo).");
     }
 
     @Override
@@ -170,16 +170,18 @@ public class AutoTotemModule extends Module {
         int syncId = mc.player.currentScreenHandler.syncId;
         
         if (silentMode.get()) {
+            short rev = (short) mc.player.currentScreenHandler.getRevision();
+            
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, mc.player.currentScreenHandler.getRevision(), fromC, 0, SlotActionType.PICKUP,
+                syncId, rev, fromC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, mc.player.currentScreenHandler.getRevision(), toC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 1), toC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, mc.player.currentScreenHandler.getRevision(), fromC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 2), fromC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
         } else {
