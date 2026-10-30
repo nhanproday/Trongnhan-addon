@@ -173,17 +173,18 @@ public class AutoTotemModule extends Module {
             short rev = (short) mc.player.currentScreenHandler.getRevision();
             short shortFromC = (short) fromC;
             short shortToC = (short) toC;
+            byte button = (byte) 0;
             
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, rev, shortFromC, 0, SlotActionType.PICKUP,
+                syncId, rev, shortFromC, button, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 1), shortToC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 1), shortToC, button, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 2), shortFromC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 2), shortFromC, button, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
         } else {
