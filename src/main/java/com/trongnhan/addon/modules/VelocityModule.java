@@ -18,6 +18,8 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 
+import java.util.Optional;
+
 public class VelocityModule extends Module {
     public enum Mode { Normal, Walls, Cancel, Grim }
 
@@ -181,7 +183,12 @@ public class VelocityModule extends Module {
         }
 
         if (event.packet instanceof ExplosionS2CPacket packet && explosions.get()) {
-            Vec3d knockback = packet.getPlayerKnockback().orElse(Vec3d.ZERO);
+            Vec3d knockback = Vec3d.ZERO;
+            try {
+                java.lang.reflect.Method getKnockback = packet.getClass().getMethod("getPlayerKnockback");
+                Optional<Vec3d> opt = (Optional<Vec3d>) getKnockback.invoke(packet);
+                if (opt.isPresent()) knockback = opt.get();
+            } catch (Exception ignored) {}
             
             switch (mode.get()) {
                 case Normal -> scaleExplosion(packet, knockback);
