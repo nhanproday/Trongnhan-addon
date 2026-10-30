@@ -167,21 +167,23 @@ public class AutoTotemModule extends Module {
 
     private void executePickupSwap(int fromC, int toC) {
         if (mc.player == null || mc.interactionManager == null) return;
-        int syncId = mc.player.currentScreenHandler.syncId;
+        short syncId = (short) mc.player.currentScreenHandler.syncId;
         
         if (silentMode.get()) {
             short rev = (short) mc.player.currentScreenHandler.getRevision();
+            short shortFromC = (short) fromC;
+            short shortToC = (short) toC;
             
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, rev, fromC, 0, SlotActionType.PICKUP,
+                syncId, rev, shortFromC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 1), toC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 1), shortToC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
             mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 2), fromC, 0, SlotActionType.PICKUP,
+                syncId, (short)(rev + 2), shortFromC, 0, SlotActionType.PICKUP,
                 mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
             ));
         } else {
