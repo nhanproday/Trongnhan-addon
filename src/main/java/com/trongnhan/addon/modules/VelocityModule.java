@@ -12,18 +12,11 @@ import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.particle.ParticleTypes;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
-
-import java.lang.reflect.Method;
-import java.util.Optional;
 
 public class VelocityModule extends Module {
     public enum Mode { Normal, Walls, Cancel, Grim }
@@ -188,57 +181,29 @@ public class VelocityModule extends Module {
         }
 
         if (event.packet instanceof ExplosionS2CPacket packet && explosions.get()) {
-            try {
-                Method getKnockback = packet.getClass().getMethod("getPlayerKnockback");
-                Optional<Vec3d> opt = (Optional<Vec3d>) getKnockback.invoke(packet);
-                Vec3d knockback = opt.orElse(Vec3d.ZERO);
-                
-                switch (mode.get()) {
-                    case Normal -> scaleExplosion(packet, knockback);
-                    case Walls -> {
-                        if (isPhased(mc.player)) scaleExplosion(packet, knockback);
-                    }
-                    case Cancel -> {
-                        if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
-                        event.cancel();
-                    }
-                    case Grim -> {
-                        if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
-                        if (onlyPhased.get() && !isPhased(mc.player)) return;
-                        if (onlyWhenHeadCovered.get()) {
-                            BlockPos target = mc.player.getBlockPos().up(2);
-                            if (mc.player.isCrawling()) target = mc.player.getBlockPos().up(1);
-                            if (mc.world.getBlockState(target).isAir()) return;
-                        }
-                        scaleExplosion(packet, knockback);
-                        pendingVelocity = true;
-                    }
+            Vec3d knockback = packet.getPlayerKnockback().orElse(Vec3d.ZERO);
+            
+            switch (mode.get()) {
+                case Normal -> scaleExplosion(packet, knockback);
+                case Walls -> {
+                    if (isPhased(mc.player)) scaleExplosion(packet, knockback);
                 }
-
-                if (event.isCancelled()) {
-                    mc.execute(() -> {
-                        try {
-                            Method getX = packet.getClass().getMethod("getX");
-                            Method getY = packet.getClass().getMethod("getY");
-                            Method getZ = packet.getClass().getMethod("getZ");
-                            Method getSound = packet.getClass().getMethod("getExplosionSound");
-
-                            double x = (double) getX.invoke(packet);
-                            double y = (double) getY.invoke(packet);
-                            double z = (double) getZ.invoke(packet);
-                            RegistryEntry<SoundEvent> soundEntry = (RegistryEntry<SoundEvent>) getSound.invoke(packet);
-
-                            mc.world.playSound(
-                                x, y, z,
-                                soundEntry.value(), SoundCategory.BLOCKS,
-                                4.0F, (1.0F + (mc.world.random.nextFloat() - mc.world.random.nextFloat()) * 0.2F) * 0.7F, false
-                            );
-                            
-                            mc.world.addParticle(ParticleTypes.EXPLOSION_EMITTER, x, y, z, 1.0, 0.0, 0.0);
-                        } catch (Exception ignored) {}
-                    });
+                case Cancel -> {
+                    if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
+                    event.cancel();
                 }
-            } catch (Exception ignored) {}
+                case Grim -> {
+                    if (pause.get() && System.currentTimeMillis() - lastSetbackTime < 100L) return;
+                    if (onlyPhased.get() && !isPhased(mc.player)) return;
+                    if (onlyWhenHeadCovered.get()) {
+                        BlockPos target = mc.player.getBlockPos().up(2);
+                        if (mc.player.isCrawling()) target = mc.player.getBlockPos().up(1);
+                        if (mc.world.getBlockState(target).isAir()) return;
+                    }
+                    scaleExplosion(packet, knockback);
+                    pendingVelocity = true;
+                }
+            }
         }
 
         if (event.packet instanceof PlayerPositionLookS2CPacket) {
