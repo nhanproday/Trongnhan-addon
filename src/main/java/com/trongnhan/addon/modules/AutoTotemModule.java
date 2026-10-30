@@ -9,7 +9,6 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -167,31 +166,12 @@ public class AutoTotemModule extends Module {
 
     private void executePickupSwap(int fromC, int toC) {
         if (mc.player == null || mc.interactionManager == null) return;
-        short syncId = (short) mc.player.currentScreenHandler.syncId;
+        int syncId = mc.player.currentScreenHandler.syncId;
         
-        if (silentMode.get()) {
-            short rev = (short) mc.player.currentScreenHandler.getRevision();
-            short shortFromC = (short) fromC;
-            short shortToC = (short) toC;
-            byte button = (byte) 0;
-            
-            mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, rev, shortFromC, button, SlotActionType.PICKUP,
-                mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
-            ));
-            mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 1), shortToC, button, SlotActionType.PICKUP,
-                mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
-            ));
-            mc.getNetworkHandler().sendPacket(new ClickSlotC2SPacket(
-                syncId, (short)(rev + 2), shortFromC, button, SlotActionType.PICKUP,
-                mc.player.currentScreenHandler.getCursorStack(), new net.minecraft.screen.slot.SlotActionType[0]
-            ));
-        } else {
-            mc.interactionManager.clickSlot(syncId, fromC, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, toC, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(syncId, fromC, 0, SlotActionType.PICKUP, mc.player);
-        }
+        // Dùng interactionManager để nó tự build packet chuẩn cho 1.21.11
+        mc.interactionManager.clickSlot(syncId, fromC, 0, SlotActionType.PICKUP, mc.player);
+        mc.interactionManager.clickSlot(syncId, toC, 0, SlotActionType.PICKUP, mc.player);
+        mc.interactionManager.clickSlot(syncId, fromC, 0, SlotActionType.PICKUP, mc.player);
     }
 
     private void syncSelected() {
