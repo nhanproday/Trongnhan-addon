@@ -18,7 +18,7 @@ public class TrongNhanAddon extends MeteorAddon {
         
         // Đăng ký các module
         Modules.get().add(new AutoTotemModule());
-        Modules.get().add(new SpeedMine()); // Thêm dòng này để đăng ký SpeedMine
+        Modules.get().add(new SpeedMinePlusPlus()); // Thêm dòng này để đăng ký SpeedMine
     }
 
     @Override
