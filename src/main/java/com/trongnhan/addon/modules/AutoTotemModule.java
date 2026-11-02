@@ -22,8 +22,8 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.Vec2f;
 
-public class AutoTotem extends Module {
-    private static AutoTotem activeInstance;
+public class AutoTotemModule extends Module {
+    private static AutoTotemModule activeInstance;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -53,9 +53,9 @@ public class AutoTotem extends Module {
     private boolean swapQueued;
     private boolean urgentPop;
 
-    public AutoTotem() {
+    public AutoTotemModule() {
         super(
-            KlangTemplate.PVP_CATEGORY,
+            TrongNhanAddon.CATEGORY,
             "auto-totem",
             "Automatically equips a totem directly from inventory into the offhand."
         );
