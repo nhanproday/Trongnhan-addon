@@ -1,23 +1,20 @@
 package com.trongnhan.addon;
 
 import com.mojang.logging.LogUtils;
-import com.trongnhan.addon.modules.AutoTotemModule;
-import com.trongnhan.addon.modules.SpeedMine; // Thêm import cho SpeedMine
-import meteordevelopment.meteorclient.addons.MeteorAddon;
+import meteordevelopment.meteorclient.addons.Addon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import org.slf4j.Logger;
 
-public class TrongNhanAddon extends MeteorAddon {
+public class TrongNhanAddon extends Addon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category CATEGORY = new Category("TrongNhan");
 
     @Override
     public void onInitialize() {
-        LOG.info("[TrongNhan] init");
-        
-        // Đăng ký các module
-        Modules.get().add(new AutoTotemModule());
+        LOG.info("Initializing TrongNhan Addon");
+
+        Modules.get().add(new com.trongnhan.addon.modules.AutoTotemModule());
     }
 
     @Override
