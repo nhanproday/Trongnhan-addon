@@ -6,6 +6,7 @@ import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEv
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -31,9 +32,9 @@ public class AutoTotemModule extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgSlots = settings.createGroup("Slots");
 
-    private final Setting<Double> healthThreshold = sgGeneral.add(new meteordevelopment.meteorclient.settings.DoubleSetting.Builder()
+    private final Setting<Double> healthThreshold = sgGeneral.add(new DoubleSetting.Builder()
         .name("health-threshold")
-        .description("Khi mau (HP, 2 HP = 1 tim) <= gia tri nay thi chuyen totem len hotbar.")
+        .description("Khi mau <= gia tri nay thi bat dau kich hoat he thong mainhand.")
         .defaultValue(6.0)
         .min(1.0)
         .max(20.0)
@@ -45,7 +46,7 @@ public class AutoTotemModule extends Module {
 
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
         .name("delay")
-        .description("So tick cho giua moi lan swap")
+        .description("So tick cho giua moi lan thuc hien thao tac.")
         .defaultValue(0)
         .min(0)
         .sliderMax(20)
@@ -55,14 +56,14 @@ public class AutoTotemModule extends Module {
     private final Setting<Boolean> yieldMeteorOffhand = sgGeneral.add(
         new BoolSetting.Builder()
             .name("yield-meteor-offhand")
-            .description("Tu dong dung khi Meteor Offhand module dang active")
+            .description("Tu dong dung khi Meteor Offhand module dang active.")
             .defaultValue(true)
             .build()
     );
 
     private final Setting<Integer> minSlot = sgSlots.add(new IntSetting.Builder()
         .name("min-slot")
-        .description("Slot hotbar thap nhat (1-9) dung de cam totem.")
+        .description("Slot hotbar 1 (chinh).")
         .defaultValue(1)
         .min(1)
         .max(9)
@@ -73,7 +74,7 @@ public class AutoTotemModule extends Module {
 
     private final Setting<Integer> maxSlot = sgSlots.add(new IntSetting.Builder()
         .name("max-slot")
-        .description("Slot hotbar cao nhat (1-9) dung de cam totem.")
+        .description("Slot hotbar 2 (du phong).")
         .defaultValue(2)
         .min(1)
         .max(9)
@@ -96,7 +97,7 @@ public class AutoTotemModule extends Module {
         super(
             TrongNhanAddon.CATEGORY,
             "auto-totem",
-            "Anti-ban offhand swap combined with main-hand backup hotbar totem pull."
+            "Offhand va Mainhand deu keo totem truc tiep tu balo an toan chong ban."
         );
         activeInstance = this;
     }
@@ -188,11 +189,11 @@ public class AutoTotemModule extends Module {
         if (urgentPop) cooldown = 0;
         if (swapQueued) return;
 
-        int totemIndex = findTotemSlot();
+        int totemIndex = findTotemInInventoryOnly();
         if (totemIndex < 0) return;
 
         if (swapPhase == SwapPhase.NEUTRAL_READY) {
-            if (swapTotemDirectlyToOffhand(totemIndex)) {
+            if (swapTotemDirectlyToSlot(totemIndex, 40)) {
                 swapQueued = true;
                 urgentPop = false;
                 cooldown = delay.get();
@@ -225,46 +226,61 @@ public class AutoTotemModule extends Module {
             return;
         }
 
-        int min = minSlot.get() - 1;
-        int max = maxSlot.get() - 1;
+        int slot1 = minSlot.get() - 1;
+        int slot2 = maxSlot.get() - 1;
 
-        if (max <= min) {
-            max = Math.min(min + 1, 8);
-        }
+        if (slot1 < 0 || slot1 > 8 || slot2 < 0 || slot2 > 8) return;
+        if (slot1 == slot2) slot2 = Math.min(slot1 + 1, 8);
 
-        boolean minHasTotem = inv.getStack(min).isOf(Items.TOTEM_OF_UNDYING);
-        boolean maxHasTotem = inv.getStack(max).isOf(Items.TOTEM_OF_UNDYING);
+        boolean has1 = inv.getStack(slot1).isOf(Items.TOTEM_OF_UNDYING);
+        boolean has2 = inv.getStack(slot2).isOf(Items.TOTEM_OF_UNDYING);
 
-        if (minHasTotem) return;
+        if (!has1 && !has2) {
+            int totemInvIndex = findTotemInInventoryOnly();
+            if (totemInvIndex < 0) return;
 
-        if (maxHasTotem) {
-            if (player.getInventory().getSelectedSlot() == min) {
-                selectHotbarSlot(max);
+            if (swapPhase == SwapPhase.NEUTRAL_READY) {
+                if (swapTotemDirectlyToSlot(totemInvIndex, slot1)) {
+                    inv.setSelectedSlot(slot1);
+                    waitTicks = delay.get();
+                }
+                swapPhase = SwapPhase.IDLE;
+                return;
+            }
+
+            if (swapPhase != SwapPhase.NEUTRAL_ARMED && swapPhase != SwapPhase.NEUTRAL_APPLIED) {
+                swapPhase = SwapPhase.NEUTRAL_ARMED;
             }
             return;
         }
 
-        int totemInvIndex = findMainHandTotemInventory();
-        if (totemInvIndex < 0) return;
-
-        boolean moved = moveTotemToHotbarSlot(totemInvIndex, min);
-        if (!moved) {
-            moved = moveTotemToHotbarSlot(totemInvIndex, max);
-        }
-
-        if (moved) {
-            if (inv.getStack(min).isOf(Items.TOTEM_OF_UNDYING)) {
-                selectHotbarSlot(min);
-            } else if (inv.getStack(max).isOf(Items.TOTEM_OF_UNDYING)) {
-                selectHotbarSlot(max);
+        if (has1) {
+            if (inv.getSelectedSlot() != slot1) {
+                inv.setSelectedSlot(slot1);
+                waitTicks = delay.get();
             }
-            waitTicks = delay.get();
+        } else if (has2) {
+            if (inv.getSelectedSlot() != slot2) {
+                inv.setSelectedSlot(slot2);
+                waitTicks = delay.get();
+            }
+
+            int totemInvIndex = findTotemInInventoryOnly();
+            if (totemInvIndex >= 0) {
+                if (swapPhase == SwapPhase.NEUTRAL_READY) {
+                    swapTotemDirectlyToSlot(totemInvIndex, slot1);
+                    swapPhase = SwapPhase.IDLE;
+                    waitTicks = delay.get();
+                } else if (swapPhase != SwapPhase.NEUTRAL_ARMED && swapPhase != SwapPhase.NEUTRAL_APPLIED) {
+                    swapPhase = SwapPhase.NEUTRAL_ARMED;
+                }
+            }
         }
     }
 
-    private boolean swapTotemDirectlyToOffhand(int inventoryIndex) {
+    private boolean swapTotemDirectlyToSlot(int inventoryIndex, int targetSlotId) {
         if (mc.player == null || mc.interactionManager == null) return false;
-        if (inventoryIndex < 0 || inventoryIndex > 35) return false;
+        if (inventoryIndex < 9 || inventoryIndex > 35) return false;
 
         ScreenHandler handler = mc.player.currentScreenHandler;
         if (handler == null) return false;
@@ -280,7 +296,7 @@ public class AutoTotemModule extends Module {
         mc.interactionManager.clickSlot(
             handler.syncId,
             handlerSlot,
-            40,
+            targetSlotId,
             SlotActionType.SWAP,
             mc.player
         );
@@ -288,58 +304,15 @@ public class AutoTotemModule extends Module {
         return true;
     }
 
-    private boolean moveTotemToHotbarSlot(int inventoryIndex, int hotbarSlot) {
-        if (mc.player == null || mc.interactionManager == null) return false;
-
-        ScreenHandler handler = mc.player.currentScreenHandler;
-        if (handler == null) return false;
-
-        int handlerSlot = resolvePlayerHandlerSlot(handler, inventoryIndex);
-        if (handlerSlot < 0) return false;
-
-        Slot source = handler.getSlot(handlerSlot);
-        if (source.inventory != mc.player.getInventory()) return false;
-        if (source.getIndex() != inventoryIndex) return false;
-        if (!source.getStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
-
-        mc.interactionManager.clickSlot(
-            handler.syncId,
-            handlerSlot,
-            hotbarSlot,
-            SlotActionType.SWAP,
-            mc.player
-        );
-
-        return true;
-    }
-
-    private int findTotemSlot() {
+    private int findTotemInInventoryOnly() {
         if (mc.player == null) return -1;
-        PlayerInventory inventory = mc.player.getInventory();
-        for (int i = 0; i < 36; i++) {
-            if (inventory.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
+        PlayerInventory inv = mc.player.getInventory();
+        for (int i = 9; i < 36; i++) {
+            if (inv.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
                 return i;
             }
         }
         return -1;
-    }
-
-    private int findMainHandTotemInventory() {
-        if (mc.player == null) return -1;
-        PlayerInventory inv = mc.player.getInventory();
-        for (int i = 9; i < 36; i++) {
-            if (inv.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i;
-        }
-        for (int i = 0; i < 9; i++) {
-            if (i == minSlot.get() - 1 || i == maxSlot.get() - 1) continue;
-            if (inv.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i;
-        }
-        return -1;
-    }
-
-    private void selectHotbarSlot(int slot) {
-        if (mc.player == null) return;
-        mc.player.getInventory().setSelectedSlot(slot);
     }
 
     private void ensureNeutralInput() {
