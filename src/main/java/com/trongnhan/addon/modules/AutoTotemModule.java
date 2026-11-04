@@ -6,41 +6,49 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.multiplayer.MultiPlayerGameMode;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.*;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.network.ServerAddress;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.network.packet.s2c.play.CloseScreenS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.*;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.scores.*;
+import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.network.packet.s2c.play.OpenScreenS2CPacket;
+import net.minecraft.network.packet.s2c.play.OverlayMessageS2CPacket;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.slot.Slot;
+import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.scoreboard.Scoreboard;
+import net.minecraft.scoreboard.ScoreboardDisplaySlot;
+import net.minecraft.scoreboard.ScoreboardEntry;
+import net.minecraft.scoreboard.ScoreboardObjective;
+import net.minecraft.scoreboard.Team;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
-public class AutoTotemKingMC extends Module {
+public class AutoTotemModule extends Module {
 
     private final SettingGroup sgTotem = settings.createGroup("Totem");
     private final SettingGroup sgInventory = settings.createGroup("Inventory");
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     public final Setting<Integer> totemAmount = sgTotem.add(new IntSetting.Builder()
-        .name("totem-amount").description("How many totems to buy per order.").defaultValue(1).min(1).sliderMax(10).build());
+        .name("totem-amount").defaultValue(1).min(1).sliderMax(10).build());
 
     public final Setting<Boolean> belowThreshold = sgTotem.add(new BoolSetting.Builder()
-        .name("below-threshold").description("Auto buy totems if inventory has less than threshold.").defaultValue(false).build());
+        .name("below-threshold").defaultValue(false).build());
 
     public final Setting<Integer> totemThreshold = sgTotem.add(new IntSetting.Builder()
-        .name("totem-threshold").description("Totem count below which auto-buy triggers.").defaultValue(3).min(1).sliderMax(36).build());
+        .name("totem-threshold").defaultValue(3).min(1).sliderMax(36).build());
 
     public final Setting<Integer> crystalStacks = sgTotem.add(new IntSetting.Builder()
         .name("crystal-stacks").defaultValue(1).min(1).sliderMax(10).build());
@@ -79,20 +87,20 @@ public class AutoTotemKingMC extends Module {
         .name("enderpearl-threshold").defaultValue(16).min(1).sliderMax(64).build());
 
     public final Setting<Boolean> inventoryTotem = sgInventory.add(new BoolSetting.Builder()
-        .name("inventory-totem").description("Keeps only a set number of totems in main inventory and throws the rest.").defaultValue(true).build());
+        .name("inventory-totem").defaultValue(true).build());
 
     public final Setting<Integer> keepAmount = sgInventory.add(new IntSetting.Builder()
-        .name("keep-amount").description("How many totems to keep in main inventory.").defaultValue(3).min(0).sliderMax(10)
+        .name("keep-amount").defaultValue(3).min(0).sliderMax(10)
         .visible(inventoryTotem::get).build());
 
     public final Setting<Integer> hotbarSlotFirst = sgInventory.add(new IntSetting.Builder()
-        .name("hotbar-slot-first").description("Hotbar slot range kept for totems.").defaultValue(1).min(1).sliderMax(9).build());
+        .name("hotbar-slot-first").defaultValue(1).min(1).sliderMax(9).build());
 
     public final Setting<Integer> hotbarSlotLast = sgInventory.add(new IntSetting.Builder()
         .name("hotbar-slot-last").defaultValue(1).min(1).sliderMax(9).build());
 
     public final Setting<Boolean> mainhandTotem = sgInventory.add(new BoolSetting.Builder()
-        .name("mainhand-totem").description("Always keep a totem in the mainhand.").defaultValue(false).build());
+        .name("mainhand-totem").defaultValue(false).build());
 
     public final Setting<Boolean> disableOnDeath = sgGeneral.add(new BoolSetting.Builder()
         .name("disable-on-death").defaultValue(false).build());
@@ -101,10 +109,10 @@ public class AutoTotemKingMC extends Module {
         .name("disable-on-log").defaultValue(false).build());
 
     public final Setting<Integer> actionDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("action-delay").description("Ticks between each shop GUI click.").defaultValue(4).min(0).sliderMax(20).build());
+        .name("action-delay").defaultValue(0).min(0).sliderMax(20).build());
 
     public final Setting<Boolean> silent = sgGeneral.add(new BoolSetting.Builder()
-        .name("silent").description("Buys without showing shop GUI.").defaultValue(true).build());
+        .name("silent").defaultValue(true).build());
 
     public final Setting<Boolean> debug = sgGeneral.add(new BoolSetting.Builder()
         .name("debug").defaultValue(false).build());
@@ -137,7 +145,7 @@ public class AutoTotemKingMC extends Module {
     private int preClickItemCount;
     private static long globalLockUntil = 0L;
     private boolean lastWasTotemOrder;
-    private ClientLevel lastLevelForLock;
+    private ClientWorld lastWorldForLock;
     private long lockUntil;
     private final Map<ShopItem, Long> lastBuyAttempt = new HashMap<>();
     private String lastErrorMessage;
@@ -151,15 +159,13 @@ public class AutoTotemKingMC extends Module {
     private static final int INV_FIRST = 9;
     private static final int INV_LAST = 35;
 
-    public AutoTotemKingMC() {
+    public AutoTotemModule() {
         super(TrongNhanAddon.CATEGORY, "auto-totem-kingmc",
             "Buys totems with AutoShop on every pop instead of swapping them out of the inventory (KingMC).");
     }
 
     @Override
-    public void onActivate() {
-        resetAll();
-    }
+    public void onActivate() { resetAll(); }
 
     @Override
     public void onDeactivate() {
@@ -187,9 +193,9 @@ public class AutoTotemKingMC extends Module {
     @EventHandler(priority = 100000)
     private void onPacketReceive(PacketEvent.Receive e) {
         if (e.packet instanceof EntityStatusS2CPacket packet) {
-            if (packet.getStatus() == 35 && mc.level != null && mc.player != null
-                && packet.getEntity(mc.level) == mc.player) {
-                if (mc.player.getMainHandItem().is(Items.TOTEM_OF_UNDYING)) {
+            if (packet.getStatus() == 35 && mc.world != null && mc.player != null
+                && packet.getEntity(mc.world) == mc.player) {
+                if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
                     mainhandSelectDeadlineMs = System.currentTimeMillis();
                 }
                 popPending = true;
@@ -198,25 +204,23 @@ public class AutoTotemKingMC extends Module {
         }
         if (!debug.get()) return;
         Packet<?> p = e.packet;
-        if (p instanceof ClientboundSystemChatPacket chat) {
-            String suffix = chat.overlay() ? " (actionbar)" : "";
-            log("server msg" + suffix + ": " + chat.content().getString());
-        } else if (p instanceof ClientboundSetActionBarTextPacket ab) {
-            log("actionbar: " + ab.text().getString());
-        } else if (p instanceof ClientboundOpenScreenPacket os) {
-            log("open screen id=" + os.getContainerId() + " title=" + os.getTitle().getString());
-        } else if (p instanceof ClientboundContainerClosePacket cc) {
-            log("server closed window " + cc.getContainerId());
+        if (p instanceof GameMessageS2CPacket chat) {
+            log("server msg: " + chat.content().getString());
+        } else if (p instanceof OverlayMessageS2CPacket ab) {
+            log("actionbar: " + ab.getMessage().getString());
+        } else if (p instanceof OpenScreenS2CPacket os) {
+            log("open screen id=" + os.getSyncId() + " title=" + os.getName().getString());
+        } else if (p instanceof CloseScreenS2CPacket cc) {
+            log("server closed window " + cc.getSyncId());
         }
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre e) {
-        if (mc.player == null || mc.level == null) return;
+        if (mc.player == null || mc.world == null) return;
         if (!mc.player.isAlive()) return;
 
         long now = System.currentTimeMillis();
-
         hotbarMaintenance();
         handleShopState(now);
     }
@@ -226,7 +230,7 @@ public class AutoTotemKingMC extends Module {
         keepMainhandTotem();
         keepHotbarTotemSelected();
 
-        if (mc.player.containerMenu.getCarried().isEmpty()) {
+        if (mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
             throwExcessInventoryTotems();
             if (!isRunning()) makeRoomInHotbarSlots();
         }
@@ -254,10 +258,10 @@ public class AutoTotemKingMC extends Module {
             mainhandSelectDeadlineMs = 0L;
             return;
         }
-        Inventory inv = mc.player.getInventory();
-        int selected = inv.getSelectedSlot();
-        ItemStack cur = inv.getItem(selected);
-        if (cur.is(Items.TOTEM_OF_UNDYING)) return;
+        PlayerInventory inv = mc.player.getInventory();
+        int selected = inv.selectedSlot;
+        ItemStack cur = inv.getStack(selected);
+        if (cur.isOf(Items.TOTEM_OF_UNDYING)) return;
         if (!cur.isEmpty()) { mainhandSelectDeadlineMs = 0L; return; }
         int found = findItemSlot(Items.TOTEM_OF_UNDYING, HOTBAR_FIRST, HOTBAR_LAST);
         if (found != -1) {
@@ -268,25 +272,25 @@ public class AutoTotemKingMC extends Module {
 
     private void keepMainhandTotem() {
         if (!mainhandTotem.get()) return;
-        if (mc.player.getMainHandItem().is(Items.TOTEM_OF_UNDYING)) return;
+        if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
         int found = findItemSlot(Items.TOTEM_OF_UNDYING, HOTBAR_FIRST, HOTBAR_LAST);
         if (found != -1) selectHotbarSlot(found);
     }
 
     private void keepHotbarTotemSelected() {
         if (!shouldManageHotbar()) return;
-        if (mc.options.keyUse.isDown() || mc.player.isUsingItem()) return;
+        if (mc.options.useKey.isPressed() || mc.player.isUsingItem()) return;
 
-        int selected = mc.player.getInventory().getSelectedSlot();
+        int selected = mc.player.getInventory().selectedSlot;
         int first = hotbarSlotFirst.get() - 1;
         int last = hotbarSlotLast.get() - 1;
 
-        if (mc.player.getInventory().getItem(selected).is(Items.TOTEM_OF_UNDYING)
+        if (mc.player.getInventory().getStack(selected).isOf(Items.TOTEM_OF_UNDYING)
             && selected >= first && selected <= last) return;
 
         int found = findItemSlot(Items.TOTEM_OF_UNDYING, first, last);
         if (found == -1) {
-            if (mc.player.getMainHandItem().is(Items.TOTEM_OF_UNDYING)) return;
+            if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
             if (selected >= first && selected <= last) return;
             found = first;
         }
@@ -297,16 +301,16 @@ public class AutoTotemKingMC extends Module {
         if (!inventoryTotem.get()) return;
         int keep = keepAmount.get();
         int seen = 0;
-        Inventory inv = mc.player.getInventory();
+        PlayerInventory inv = mc.player.getInventory();
         for (int i = INV_FIRST; i <= INV_LAST; i++) {
-            if (inv.getItem(i).is(Items.TOTEM_OF_UNDYING)) {
+            if (inv.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
                 seen++;
                 if (seen > keep) {
                     int containerSlot = toHandlerSlot(i);
-                    if (containerSlot >= 0 && mc.gameMode != null) {
-                        mc.gameMode.handleContainerInput(
-                            mc.player.containerMenu.containerId,
-                            containerSlot, 1, ContainerInput.THROW, mc.player);
+                    if (containerSlot >= 0 && mc.interactionManager != null) {
+                        mc.interactionManager.clickSlot(
+                            mc.player.currentScreenHandler.syncId,
+                            containerSlot, 1, SlotActionType.THROW, mc.player);
                     }
                 }
             }
@@ -317,10 +321,10 @@ public class AutoTotemKingMC extends Module {
         int start = hotbarSlotFirst.get() - 1;
         int end = hotbarSlotLast.get() - 1;
         if (start > end) return;
-        Inventory inv = mc.player.getInventory();
+        PlayerInventory inv = mc.player.getInventory();
         for (int i = start; i <= end; i++) {
-            ItemStack st = inv.getItem(i);
-            if (st.isEmpty() || st.is(Items.TOTEM_OF_UNDYING)) continue;
+            ItemStack st = inv.getStack(i);
+            if (st.isEmpty() || st.isOf(Items.TOTEM_OF_UNDYING)) continue;
             int emptyInvSlot = findEmptySlot(INV_FIRST, INV_LAST);
             if (emptyInvSlot == -1) return;
             swapSlots(emptyInvSlot, i);
@@ -335,16 +339,14 @@ public class AutoTotemKingMC extends Module {
         try { used = invUsedFraction(); } catch (Throwable t) { used = 0.0; }
 
         if (Math.abs(used - 1.0) > 0.05) {
-            int containerId = mc.player.inventoryMenu.containerId;
-            for (Slot slot : mc.player.inventoryMenu.slots) {
-                if (slot != null && slot.getItem().is(Items.TOTEM_OF_UNDYING)) {
-                    mc.gameMode.handleContainerInput(containerId, slot.index, 1, ContainerInput.THROW, mc.player);
+            int syncId = mc.player.playerScreenHandler.syncId;
+            for (Slot slot : mc.player.playerScreenHandler.slots) {
+                if (slot != null && slot.getStack().isOf(Items.TOTEM_OF_UNDYING)) {
+                    mc.interactionManager.clickSlot(syncId, slot.id, 1, SlotActionType.THROW, mc.player);
                 }
             }
         } else {
-            if (debug.get()) {
-                log("buy: " + reason);
-            }
+            if (debug.get()) log("buy: " + reason);
             buyTotemNow();
         }
     }
@@ -356,11 +358,8 @@ public class AutoTotemKingMC extends Module {
             return;
         }
 
-        if (state == ShopState.IDLE) {
-            handleIdle();
-        } else {
-            handleActive(now);
-        }
+        if (state == ShopState.IDLE) handleIdle();
+        else handleActive(now);
     }
 
     private void handleIdle() {
@@ -368,7 +367,7 @@ public class AutoTotemKingMC extends Module {
         if (want == null) { lastErrorMessage = null; return; }
         if (!mc.player.isAlive()) { warn(want, "you are dead"); return; }
         if (!isScreenSafeToBuy()) {
-            Screen s = mc.screen;
+            Screen s = mc.currentScreen;
             warn(want, "a screen is open (" + (s != null ? s.getClass().getSimpleName() : "?") + "), close it");
             return;
         }
@@ -396,10 +395,10 @@ public class AutoTotemKingMC extends Module {
         if (countItem(item) >= threshold.get()) return false;
         if (!isOnKingMC()) { warn(shop, "only works when joined through java.kingmc.vn or kingmc.vn"); return false; }
         if (!shopOpenPossible()) { warn(shop, "in hub/login, or /shop didn't open in this world"); return false; }
-        if (!mc.player.containerMenu.getCarried().isEmpty()) {
+        if (!mc.player.currentScreenHandler.getCursorStack().isEmpty()) {
             warn(shop, "an item is on your cursor (dropping it first)");
-            MultiPlayerGameMode gm = mc.gameMode;
-            if (gm != null) gm.handleContainerInput(mc.player.containerMenu.containerId, -999, 0, ContainerInput.PICKUP, mc.player);
+            if (mc.interactionManager != null)
+                mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, -999, 0, SlotActionType.PICKUP, mc.player);
             return false;
         }
         if (!hasFreeOrPartialSlot(item)) { warn(shop, "inventory full (no free slot)"); return false; }
@@ -413,7 +412,7 @@ public class AutoTotemKingMC extends Module {
     }
 
     public synchronized void enqueue(ShopItem item, int amount) {
-        if (mc.player == null || mc.getConnection() == null) return;
+        if (mc.player == null || mc.getNetworkHandler() == null) return;
         if (!isOnKingMC()) return;
         if (state != ShopState.IDLE) return;
         if (amount <= 0) return;
@@ -437,10 +436,7 @@ public class AutoTotemKingMC extends Module {
     public synchronized void buyTotemNow() {
         if (!shopOpenPossible()) return;
 
-        if (state == ShopState.IDLE) {
-            enqueue(ShopItem.Totem, 3);
-            return;
-        }
+        if (state == ShopState.IDLE) { enqueue(ShopItem.Totem, 3); return; }
         if (currentOrder != null && currentOrder.item == ShopItem.Totem) {
             currentOrder.remaining = Math.min(currentOrder.remaining + 1, 5);
             log("buyTotemNow: running totem order -> remaining=" + currentOrder.remaining);
@@ -472,12 +468,12 @@ public class AutoTotemKingMC extends Module {
             if (!shopWindowChanged()) {
                 if (++waitTicks < 10) return;
                 waitTicks = 0;
-                boolean sameLevel = (mc.level == lastLevelForLock);
+                boolean sameWorld = (mc.world == lastWorldForLock);
                 retryCount++;
                 log("shop not open after 10 ticks, retry #" + retryCount + " (open window=" + currentContainerId() + ", stale=" + staleContainerId + ")");
-                if (retryCount > (sameLevel ? 5 : 1)) {
-                    if (!sameLevel) {
-                        lastLevelForLock = mc.level;
+                if (retryCount > (sameWorld ? 5 : 1)) {
+                    if (!sameWorld) {
+                        lastWorldForLock = mc.world;
                         lockUntil = now + 30000L;
                     }
                     abort("Shop GUI never opened after 5 tries (server refused /shop? e.g. combat tag, check chat).");
@@ -502,11 +498,11 @@ public class AutoTotemKingMC extends Module {
                 retryCount++;
                 log("item page not open after 10 ticks, retry #" + retryCount + " (open window=" + currentContainerId() + ", stale=" + staleContainerId + ")");
                 if (retryCount > 5) {
-                    mc.player.containerMenu.setCarried(ItemStack.EMPTY);
+                    mc.player.currentScreenHandler.setCursorStack(ItemStack.EMPTY);
                     abort("Item page never opened after 5 tries.");
                     return;
                 }
-                mc.player.containerMenu.setCarried(ItemStack.EMPTY);
+                mc.player.currentScreenHandler.setCursorStack(ItemStack.EMPTY);
                 closeContainer();
                 staleContainerId = currentContainerId();
                 sendShopCommand();
@@ -525,7 +521,7 @@ public class AutoTotemKingMC extends Module {
         }
         actionTicks = 0;
 
-        boolean containerOpen = mc.player.containerMenu != mc.player.inventoryMenu;
+        boolean containerOpen = mc.player.currentScreenHandler != mc.player.playerScreenHandler;
         if (state != ShopState.WAIT_SHOP && state != ShopState.WAIT_PAGE && !containerOpen) {
             abort("Shop GUI closed unexpectedly.");
             return;
@@ -559,7 +555,7 @@ public class AutoTotemKingMC extends Module {
             case Obsidian -> SLOT_OBSIDIAN;
             case EnderPearl -> SLOT_ENDERPEARL;
         };
-        if (mc.player.containerMenu.getSlot(slot).getItem().isEmpty()) {
+        if (mc.player.currentScreenHandler.getSlot(slot).getStack().isEmpty()) {
             if (++waitTicks < 10) return;
         }
         staleContainerId = currentContainerId();
@@ -582,7 +578,7 @@ public class AutoTotemKingMC extends Module {
         if (currentOrder != null && lastConfirmTime != 0) {
             if (now - lastConfirmTime < 500L) {
                 if (currentOrder.remaining <= 0 && countItem(itemOf(currentOrder.item)) <= preClickItemCount) return;
-                if (currentOrder.remaining > 0 && mc.player.containerMenu.getStateId() == lastStateId) return;
+                if (currentOrder.remaining > 0 && mc.player.currentScreenHandler.getRevision() == lastStateId) return;
             }
         }
 
@@ -617,14 +613,14 @@ public class AutoTotemKingMC extends Module {
     }
 
     private void handleConfirm(long now) {
-        if (mc.player.containerMenu.getSlot(SLOT_CONFIRM).getItem().isEmpty()) {
+        if (mc.player.currentScreenHandler.getSlot(SLOT_CONFIRM).getStack().isEmpty()) {
             if (++waitTicks < 10) return;
         }
         waitTicks = 0;
         if (currentOrder != null) preClickItemCount = countItem(itemOf(currentOrder.item));
         clickSlot(SLOT_CONFIRM);
         lastConfirmTime = now;
-        lastStateId = mc.player.containerMenu.getStateId();
+        lastStateId = mc.player.currentScreenHandler.getRevision();
         if (currentOrder != null) {
             if (currentOrder.item == ShopItem.Totem) lastWasTotemOrder = true;
             currentOrder.remaining--;
@@ -664,30 +660,29 @@ public class AutoTotemKingMC extends Module {
     }
 
     public boolean isRunning() { return state != ShopState.IDLE; }
-
     public boolean isInOrder() { return state != ShopState.IDLE || !queue.isEmpty(); }
 
     private boolean isOnKingMC() {
-        if (mc.hasSingleplayerServer() || mc.getCurrentServer() == null) return false;
-        String host = ServerAddress.parseString(mc.getCurrentServer().ip).getHost().toLowerCase(Locale.ROOT);
+        if (mc.isInSingleplayer() || mc.getCurrentServerEntry() == null) return false;
+        String host = ServerAddress.parse(mc.getCurrentServerEntry().address).getHost().toLowerCase(Locale.ROOT);
         return ALLOWED_HOSTS.contains(host);
     }
 
     private boolean shopPossible() {
         if (!isOnKingMC()) return false;
-        if (lastLevelForLock == mc.level && System.currentTimeMillis() < lockUntil) return false;
+        if (lastWorldForLock == mc.world && System.currentTimeMillis() < lockUntil) return false;
         return true;
     }
 
     private boolean shopOpenPossible() {
         if (!shopPossible()) return false;
-        if (mc.level == null) return false;
-        Scoreboard sb = mc.level.getScoreboard();
-        Objective obj = sb.getDisplayObjective(DisplaySlot.SIDEBAR);
+        if (mc.world == null) return false;
+        Scoreboard sb = mc.world.getScoreboard();
+        ScoreboardObjective obj = sb.getObjectiveForSlot(ScoreboardDisplaySlot.SIDEBAR);
         if (obj == null) return false;
-        for (PlayerScoreEntry entry : sb.listPlayerScores(obj)) {
-            PlayerTeam team = sb.getPlayersTeam(entry.owner());
-            String line = PlayerTeam.formatNameForTeam(team, entry.ownerName()).getString();
+        for (ScoreboardEntry entry : sb.getScoreboardEntries(obj)) {
+            Team team = sb.getScoreHolderTeam(entry.owner());
+            String line = Team.decorateName(team, entry.name()).getString();
             if (line.contains("/dk ") || line.contains("/dn ")) return true;
         }
         return false;
@@ -699,14 +694,14 @@ public class AutoTotemKingMC extends Module {
     }
 
     private boolean isScreenSafeToBuy() {
-        Screen s = mc.screen;
+        Screen s = mc.currentScreen;
         if (s == null) return true;
-        if (silent.get() && !(s instanceof AbstractContainerScreen)) return true;
+        if (silent.get() && !(s instanceof HandledScreen)) return true;
         return false;
     }
 
     private int currentContainerId() {
-        return mc.player.containerMenu != mc.player.inventoryMenu ? mc.player.containerMenu.containerId : -1;
+        return mc.player.currentScreenHandler != mc.player.playerScreenHandler ? mc.player.currentScreenHandler.syncId : -1;
     }
 
     private boolean shopWindowChanged() {
@@ -715,49 +710,49 @@ public class AutoTotemKingMC extends Module {
     }
 
     private void sendShopCommand() {
-        if (mc.getConnection() != null) {
+        if (mc.getNetworkHandler() != null) {
             log("send /shop open gear");
-            mc.getConnection().sendCommand("shop open gear");
+            mc.getNetworkHandler().sendChatCommand("shop open gear");
         }
     }
 
     private void closeContainer() {
         if (mc.player == null) return;
-        Screen s = mc.screen;
-        if (s != null && !(s instanceof AbstractContainerScreen)) {
-            ClientPacketListener conn = mc.getConnection();
-            if (conn != null) conn.send(new ServerboundContainerClosePacket(mc.player.containerMenu.containerId));
-            mc.player.containerMenu = mc.player.inventoryMenu;
+        Screen s = mc.currentScreen;
+        if (s != null && !(s instanceof HandledScreen)) {
+            ClientPlayNetworkHandler conn = mc.getNetworkHandler();
+            if (conn != null) conn.sendPacket(new CloseHandledScreenC2SPacket(mc.player.currentScreenHandler.syncId));
+            mc.player.currentScreenHandler = mc.player.playerScreenHandler;
         } else {
-            mc.player.closeContainer();
+            mc.player.closeHandledScreen();
         }
     }
 
     private void clickSlot(int slot) {
         if (debug.get()) {
-            AbstractContainerMenu m = mc.player.containerMenu;
-            String name = slot < m.slots.size() ? m.getSlot(slot).getItem().getHoverName().getString() : "?";
-            log("click slot " + slot + " [" + name + "] window=" + m.containerId + " stateId=" + m.getStateId());
+            ScreenHandler m = mc.player.currentScreenHandler;
+            String name = slot < m.slots.size() ? m.getSlot(slot).getStack().getName().getString() : "?";
+            log("click slot " + slot + " [" + name + "] window=" + m.syncId + " stateId=" + m.getRevision());
         }
-        if (mc.gameMode == null) return;
-        mc.gameMode.handleContainerInput(mc.player.containerMenu.containerId, slot, 0, ContainerInput.PICKUP, mc.player);
+        if (mc.interactionManager == null) return;
+        mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, slot, 0, SlotActionType.PICKUP, mc.player);
     }
 
     private int countItem(Item item) {
         int n = 0;
-        if (mc.player.getOffhandItem().is(item)) n += mc.player.getOffhandItem().getCount();
-        Inventory inv = mc.player.getInventory();
-        for (int i = 0; i <= 35; i++) if (inv.getItem(i).is(item)) n += inv.getItem(i).getCount();
+        if (mc.player.getOffHandStack().isOf(item)) n += mc.player.getOffHandStack().getCount();
+        PlayerInventory inv = mc.player.getInventory();
+        for (int i = 0; i <= 35; i++) if (inv.getStack(i).isOf(item)) n += inv.getStack(i).getCount();
         return n;
     }
 
     private boolean hasFreeOrPartialSlot(Item item) {
-        Inventory inv = mc.player.getInventory();
+        PlayerInventory inv = mc.player.getInventory();
         for (int i = 0; i <= 35; i++) {
-            ItemStack st = inv.getItem(i);
+            ItemStack st = inv.getStack(i);
             if (st.isEmpty()) return true;
-            if (st.is(item)) {
-                int cap = st.getMaxStackSize() == 64 ? 55 : (st.getMaxStackSize() == 16 ? 11 : st.getMaxStackSize());
+            if (st.isOf(item)) {
+                int cap = st.getMaxCount() == 64 ? 55 : (st.getMaxCount() == 16 ? 11 : st.getMaxCount());
                 if (st.getCount() < cap) return true;
             }
         }
@@ -770,18 +765,18 @@ public class AutoTotemKingMC extends Module {
     }
 
     private double invUsedFraction() {
-        Inventory inv = mc.player.getInventory();
+        PlayerInventory inv = mc.player.getInventory();
         int used = 0;
-        for (int i = 0; i <= 35; i++) if (!inv.getItem(i).isEmpty()) used++;
+        for (int i = 0; i <= 35; i++) if (!inv.getStack(i).isEmpty()) used++;
         return (double) used / 36.0;
     }
 
     private void throwAllTotemsInInventory() {
-        if (mc.player == null || mc.gameMode == null) return;
-        int id = mc.player.inventoryMenu.containerId;
-        for (Slot s : mc.player.inventoryMenu.slots) {
-            if (s != null && s.getItem().is(Items.TOTEM_OF_UNDYING)) {
-                mc.gameMode.handleContainerInput(id, s.index, 1, ContainerInput.THROW, mc.player);
+        if (mc.player == null || mc.interactionManager == null) return;
+        int id = mc.player.playerScreenHandler.syncId;
+        for (Slot s : mc.player.playerScreenHandler.slots) {
+            if (s != null && s.getStack().isOf(Items.TOTEM_OF_UNDYING)) {
+                mc.interactionManager.clickSlot(id, s.id, 1, SlotActionType.THROW, mc.player);
             }
         }
     }
@@ -798,57 +793,54 @@ public class AutoTotemKingMC extends Module {
 
     private int hotbarTotemCount() {
         int count = 0;
-        Inventory inv = mc.player.getInventory();
-        for (int i = HOTBAR_FIRST; i <= HOTBAR_LAST; i++) {
-            if (inv.getItem(i).is(Items.TOTEM_OF_UNDYING)) count++;
-        }
+        PlayerInventory inv = mc.player.getInventory();
+        for (int i = HOTBAR_FIRST; i <= HOTBAR_LAST; i++) if (inv.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) count++;
         return count;
     }
 
     private int findItemSlot(Item item, int from, int to) {
-        Inventory inv = mc.player.getInventory();
-        for (int i = from; i <= to; i++) if (inv.getItem(i).is(item)) return i;
+        PlayerInventory inv = mc.player.getInventory();
+        for (int i = from; i <= to; i++) if (inv.getStack(i).isOf(item)) return i;
         return -1;
     }
 
     private int findEmptySlot(int from, int to) {
-        Inventory inv = mc.player.getInventory();
-        for (int i = from; i <= to; i++) if (inv.getItem(i).isEmpty()) return i;
+        PlayerInventory inv = mc.player.getInventory();
+        for (int i = from; i <= to; i++) if (inv.getStack(i).isEmpty()) return i;
         return -1;
     }
 
     private int toHandlerSlot(int inventoryIndex) {
-        AbstractContainerMenu menu = mc.player.containerMenu;
+        ScreenHandler menu = mc.player.currentScreenHandler;
         for (int i = 0; i < menu.slots.size(); i++) {
             Slot s = menu.getSlot(i);
-            if (s.container == mc.player.getInventory() && s.getContainerSlot() == inventoryIndex) return i;
+            if (s.inventory == mc.player.getInventory() && s.getIndex() == inventoryIndex) return i;
         }
         return -1;
     }
 
     private void selectHotbarSlot(int hotbarIndex) {
-        mc.player.getInventory().setSelectedSlot(hotbarIndex);
-        if (mc.getConnection() != null) {
-            mc.getConnection().send(new ServerboundSetCarriedItemPacket(hotbarIndex));
+        mc.player.getInventory().selectedSlot = hotbarIndex;
+        if (mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(hotbarIndex));
         }
     }
 
     private void swapSlots(int inventoryA, int inventoryB) {
-        MultiPlayerGameMode gm = mc.gameMode;
-        if (gm == null) return;
-        int id = mc.player.containerMenu.containerId;
+        if (mc.interactionManager == null) return;
+        int id = mc.player.currentScreenHandler.syncId;
         int a = toHandlerSlot(inventoryA);
         int b = toHandlerSlot(inventoryB);
         if (a < 0 || b < 0) return;
-        gm.handleContainerInput(id, a, 0, ContainerInput.PICKUP, mc.player);
-        gm.handleContainerInput(id, b, 0, ContainerInput.PICKUP, mc.player);
-        gm.handleContainerInput(id, a, 0, ContainerInput.PICKUP, mc.player);
+        mc.interactionManager.clickSlot(id, a, 0, SlotActionType.PICKUP, mc.player);
+        mc.interactionManager.clickSlot(id, b, 0, SlotActionType.PICKUP, mc.player);
+        mc.interactionManager.clickSlot(id, a, 0, SlotActionType.PICKUP, mc.player);
     }
 
     private void log(String msg) {
         if (debug.get()) {
             long now = System.currentTimeMillis() % 100000L;
-            TrongNhanAddon.LOG.info("[AutoTotemKingMC] " + now + " [" + state + "] " + msg);
+            TrongNhanAddon.LOG.info("[AutoTotemModule] " + now + " [" + state + "] " + msg);
         }
     }
 
