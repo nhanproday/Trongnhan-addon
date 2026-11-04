@@ -14,18 +14,18 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
+import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.Vec2f;
-import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 public class AutoTotemVipModule extends Module {
@@ -94,12 +94,6 @@ public class AutoTotemVipModule extends Module {
         super(TrongNhanAddon.CATEGORY, "auto-totem-vip", "Tu dong lap Totem vao tay phu hoac tay chinh voi Grim bypass.");
     }
 
-    public static void tryQueuedDirectSwapAfterClientTickEnd() {
-        if (activeInstance != null && activeInstance.isActive()) {
-            activeInstance.tryQueuedMioSwap();
-        }
-    }
-
     @Override
     public void onActivate() {
         activeInstance = this;
@@ -132,8 +126,7 @@ public class AutoTotemVipModule extends Module {
     @Override
     public String getInfoString() {
         if (mc.player == null) return null;
-        int total = InvUtils.find(Items.TOTEM_OF_UNDYING).count();
-        return String.valueOf(total);
+        return String.valueOf(InvUtils.find(Items.TOTEM_OF_UNDYING).count());
     }
 
     @EventHandler(priority = -10000)
@@ -164,7 +157,7 @@ public class AutoTotemVipModule extends Module {
         if (packet.getEntity(mc.world) != mc.player) return;
 
         if (!mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
-        if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
+        if (!mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
         if (!isActive() || (yieldMeteorOffhand.get() && isMeteorOffhandActive())) return;
 
         mioPending = true;
@@ -301,9 +294,7 @@ public class AutoTotemVipModule extends Module {
     private boolean shouldRefillMainhand() {
         if (targetHand.get() == TargetHand.Offhand) return false;
         if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
-
         if (mainhandMode.get() == MainhandMode.Always) return true;
-
         float totalHp = mc.player.getHealth() + mc.player.getAbsorptionAmount();
         return totalHp <= mainhandHealth.get();
     }
@@ -347,7 +338,6 @@ public class AutoTotemVipModule extends Module {
             if (!silentMode.get()) simulateMouseOverSlot(pendingSlot);
             executeKeybindSwap(pendingSlot, pendingButton);
         }
-
         stage = Stage.Step4_Close;
         if (actionDelay.get() == 0 && silentMode.get()) handleClose();
         else delayTimer = actionDelay.get();
@@ -382,9 +372,8 @@ public class AutoTotemVipModule extends Module {
     }
 
     private void executeKeybindSwap(int slotId, int button) {
-        int syncId = silentMode.get() ? mc.player.playerScreenHandler.syncId : 
+        int syncId = silentMode.get() ? mc.player.playerScreenHandler.syncId :
             (mc.currentScreen instanceof InventoryScreen inv ? inv.getScreenHandler().syncId : 0);
-
         mc.interactionManager.clickSlot(syncId, slotId, button, SlotActionType.SWAP, mc.player);
     }
 
@@ -401,7 +390,6 @@ public class AutoTotemVipModule extends Module {
         if (mc.player == null) return -1;
         int current = mc.player.getInventory().getSelectedSlot();
         int fallback = -1;
-
         for (int i = 0; i < 9; ++i) {
             if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
                 if (i != current) return i;
@@ -421,9 +409,14 @@ public class AutoTotemVipModule extends Module {
     }
 
     private int findTotemInInventoryOnly() {
-        if (mc.player == null || mc.player.playerScreenHandler == null) return -1;
-        for (Slot slot : mc.player.playerScreenHandler.slots) {
-            if (slot.index >= 9 && slot.index <= 35 && slot.getStack().isOf(Items.TOTEM_OF_UNDYING)) return slot.index;
+        if (mc.player == null) return -1;
+        ScreenHandler handler = mc.player.playerScreenHandler;
+        if (handler == null) return -1;
+        for (int i = 0; i < handler.slots.size(); i++) {
+            Slot slot = handler.getSlot(i);
+            if (slot.inventory == mc.player.getInventory() && slot.getIndex() >= 9 && slot.getIndex() <= 35 && slot.getStack().isOf(Items.TOTEM_OF_UNDYING)) {
+                return slot.getIndex();
+            }
         }
         return -1;
     }
@@ -431,19 +424,18 @@ public class AutoTotemVipModule extends Module {
     private boolean hasSafeInventoryClickInput() {
         ClientPlayerEntity player = mc.player;
         if (player == null || player.isSprinting()) return false;
-        if (player.input == null) return true;
-
-        Vec2f movement = player.input.getMovementInput();
+        Input input = player.input;
+        if (input == null) return true;
+        Vec2f movement = input.getMovementInput();
         if (movement != null && movement.lengthSquared() > 1.0E-5f) return false;
-
-        return !(player.input.pressingForward || player.input.pressingBack || player.input.pressingLeft || player.input.pressingRight);
+        PlayerInput playerInput = input.playerInput;
+        return playerInput == null || !(playerInput.forward() || playerInput.backward() || playerInput.left() || playerInput.right());
     }
 
     private void ensureNeutralInput() {
         ClientPlayerEntity player = mc.player;
-        if (player == null || player.getVehicle() != null) return;
+        if (player == null || player.hasVehicle()) return;
         if (neutralInput != null && player.input == neutralInput) return;
-
         neutralInput = new NeutralInput(player.input);
         player.input = neutralInput;
     }
@@ -457,49 +449,36 @@ public class AutoTotemVipModule extends Module {
     }
 
     private static boolean isMeteorOffhandActive() {
-        Module offhand = Modules.get().get(meteordevelopment.meteorclient.systems.modules.combat.AutoTotem.class);
+        Module offhand = Modules.get().get(meteordevelopment.meteorclient.systems.modules.combat.Offhand.class);
         return offhand != null && offhand.isActive();
     }
 
-    private final class NeutralInput extends net.minecraft.client.input.Input {
-        final net.minecraft.client.input.Input delegate;
+    private final class NeutralInput extends Input {
+        private final Input delegate;
 
-        NeutralInput(net.minecraft.client.input.Input delegate) {
+        private NeutralInput(Input delegate) {
             this.delegate = delegate;
-            this.pressingForward = delegate.pressingForward;
-            this.pressingBack = delegate.pressingBack;
-            this.pressingLeft = delegate.pressingLeft;
-            this.pressingRight = delegate.pressingRight;
-            this.movementSideways = delegate.movementSideways;
-            this.movementForward = delegate.movementForward;
-            this.jumping = delegate.jumping;
-            this.sneaking = delegate.sneaking;
+            setState(delegate.playerInput, delegate.getMovementInput());
         }
 
         @Override
         public void tick() {
             delegate.tick();
-            this.pressingForward = delegate.pressingForward;
-            this.pressingBack = delegate.pressingBack;
-            this.pressingLeft = delegate.pressingLeft;
-            this.pressingRight = delegate.pressingRight;
-            this.movementSideways = delegate.movementSideways;
-            this.movementForward = delegate.movementForward;
-            this.jumping = delegate.jumping;
-            this.sneaking = delegate.sneaking;
+            PlayerInput original = delegate.playerInput == null ? PlayerInput.DEFAULT : delegate.playerInput;
+            setState(original, delegate.getMovementInput());
 
             if (swapPhase != SwapPhase.NeutralArmed || mc.player == null || mc.player.input != this) return;
 
-            this.pressingForward = false;
-            this.pressingBack = false;
-            this.pressingLeft = false;
-            this.pressingRight = false;
-            this.movementSideways = 0;
-            this.movementForward = 0;
-            this.jumping = false;
+            PlayerInput neutral = new PlayerInput(false, false, false, false, false, original.sneak(), false);
+            setState(neutral, Vec2f.ZERO);
             mc.player.setSprinting(false);
             neutralPlayer = mc.player;
             swapPhase = SwapPhase.NeutralApplied;
+        }
+
+        private void setState(PlayerInput input, Vec2f movement) {
+            playerInput = input == null ? PlayerInput.DEFAULT : input;
+            movementVector = movement == null ? Vec2f.ZERO : movement;
         }
     }
 
