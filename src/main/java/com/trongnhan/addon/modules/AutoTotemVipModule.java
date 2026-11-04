@@ -3,7 +3,6 @@ package com.trongnhan.addon.modules;
 import com.trongnhan.addon.TrongNhanAddon;
 import meteordevelopment.meteorclient.events.entity.player.PlayerTickMovementEvent;
 import meteordevelopment.meteorclient.events.entity.player.SendMovementPacketsEvent;
-import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -16,9 +15,9 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
-import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
@@ -31,7 +30,6 @@ import org.lwjgl.glfw.GLFW;
 public class AutoTotemVipModule extends Module {
     public static AutoTotemVipModule activeInstance;
 
-    public enum TargetHand { Both, Offhand, Mainhand }
     public enum MainhandMode { Health, Always }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -40,32 +38,21 @@ public class AutoTotemVipModule extends Module {
     private final SettingGroup sgGrim = settings.createGroup("Grim Safety");
     private final SettingGroup sgAlert = settings.createGroup("Alerts");
 
-    public final Setting<TargetHand> targetHand = sgGeneral.add(new EnumSetting.Builder<TargetHand>()
-        .name("target-hand").defaultValue(TargetHand.Both).build());
-
     public final Setting<Integer> actionDelay = sgGeneral.add(new IntSetting.Builder()
         .name("delay").defaultValue(0).min(0).sliderMax(5).build());
 
     public final Setting<MainhandMode> mainhandMode = sgMainhand.add(new EnumSetting.Builder<MainhandMode>()
-        .name("mainhand-mode").defaultValue(MainhandMode.Health)
-        .visible(() -> targetHand.get() != TargetHand.Offhand).build());
+        .name("mainhand-mode").defaultValue(MainhandMode.Health).build());
 
     public final Setting<Double> mainhandHealth = sgMainhand.add(new DoubleSetting.Builder()
         .name("mainhand-health").defaultValue(10.0).min(1.0).sliderMax(36.0)
-        .visible(() -> targetHand.get() != TargetHand.Offhand && mainhandMode.get() == MainhandMode.Health).build());
-
-    public final Setting<Boolean> hotbarSwitch = sgMainhand.add(new BoolSetting.Builder()
-        .name("hotbar-switch").defaultValue(true)
-        .visible(() -> targetHand.get() != TargetHand.Offhand).build());
+        .visible(() -> mainhandMode.get() == MainhandMode.Health).build());
 
     public final Setting<Boolean> silentMode = sgInv.add(new BoolSetting.Builder()
         .name("silent-mode").defaultValue(true).build());
 
     public final Setting<Boolean> grimSafe = sgGrim.add(new BoolSetting.Builder()
         .name("grim-safe").defaultValue(true).build());
-
-    public final Setting<Boolean> yieldMeteorOffhand = sgGrim.add(new BoolSetting.Builder()
-        .name("yield-meteor-offhand").defaultValue(true).build());
 
     public final Setting<Boolean> lowAlert = sgAlert.add(new BoolSetting.Builder()
         .name("low-alert").defaultValue(true).build());
@@ -85,13 +72,11 @@ public class AutoTotemVipModule extends Module {
 
     private enum SwapPhase { Idle, NeutralArmed, NeutralApplied, NeutralReady }
     private SwapPhase swapPhase = SwapPhase.Idle;
-    private boolean mioPending;
-    private boolean mioDirectAllowed;
     private ClientPlayerEntity neutralPlayer;
     private NeutralInput neutralInput;
 
     public AutoTotemVipModule() {
-        super(TrongNhanAddon.CATEGORY, "auto-totem-vip", "Tu dong lap Totem vao tay phu hoac tay chinh voi Grim bypass.");
+        super(TrongNhanAddon.CATEGORY, "auto-totem-vip", "Auto totem VIP (Mainhand only, Grim bypass).");
     }
 
     @Override
@@ -100,8 +85,6 @@ public class AutoTotemVipModule extends Module {
         delayTimer = 0;
         stage = Stage.Idle;
         swapPhase = SwapPhase.Idle;
-        mioPending = false;
-        mioDirectAllowed = false;
         lastInventoryTotemCount = -1;
         pendingSlot = -1;
         pendingButton = -1;
@@ -116,8 +99,6 @@ public class AutoTotemVipModule extends Module {
         }
         stage = Stage.Idle;
         swapPhase = SwapPhase.Idle;
-        mioPending = false;
-        mioDirectAllowed = false;
         pendingSlot = -1;
         pendingButton = -1;
         restoreNeutralInput();
@@ -150,32 +131,8 @@ public class AutoTotemVipModule extends Module {
     }
 
     @EventHandler
-    private void onPacketReceive(PacketEvent.Receive event) {
-        if (!(event.packet instanceof EntityStatusS2CPacket packet)) return;
-        if (packet.getStatus() != 35) return;
-        if (mc.world == null || mc.player == null) return;
-        if (packet.getEntity(mc.world) != mc.player) return;
-
-        if (!mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
-        if (!mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
-        if (!isActive() || (yieldMeteorOffhand.get() && isMeteorOffhandActive())) return;
-
-        mioPending = true;
-        mioDirectAllowed = true;
-        if (grimSafe.get()) {
-            if (swapPhase == SwapPhase.Idle) {
-                swapPhase = SwapPhase.NeutralArmed;
-            }
-            if (swapPhase == SwapPhase.NeutralReady) {
-                tryQueuedMioSwap();
-            }
-        }
-    }
-
-    @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.getNetworkHandler() == null) return;
-        if (yieldMeteorOffhand.get() && isMeteorOffhandActive()) return;
 
         int currentInvTotems = countInventoryTotemsOnly();
 
@@ -193,7 +150,6 @@ public class AutoTotemVipModule extends Module {
             if (swapPhase == SwapPhase.NeutralArmed || swapPhase == SwapPhase.NeutralApplied) return;
             if (swapPhase == SwapPhase.NeutralReady) {
                 swapPhase = SwapPhase.Idle;
-                mioDirectAllowed = false;
                 handleIdle();
                 return;
             }
@@ -212,110 +168,52 @@ public class AutoTotemVipModule extends Module {
         }
     }
 
-    private boolean tryQueuedMioSwap() {
-        if (!mioPending || !mioDirectAllowed) return false;
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
-        if (mc.player.isCreative() || mc.player.isSpectator()) return false;
-        if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
-            mioPending = false;
-            mioDirectAllowed = false;
-            swapPhase = SwapPhase.Idle;
-            return false;
-        }
-
-        int totemSlot = findTotemInInventoryOnly();
-        if (totemSlot < 0) return false;
-
-        swapPhase = SwapPhase.Idle;
-        mioDirectAllowed = false;
-        executeKeybindSwap(totemSlot, 40);
-        delayTimer = actionDelay.get();
-        mioPending = false;
-        return true;
-    }
-
     private void handleIdle() {
         if (mc.player == null) return;
 
-        if (shouldRefillOffhand()) {
-            if (grimSafe.get() && !hasSafeInventoryClickInput() && swapPhase == SwapPhase.Idle) {
-                swapPhase = SwapPhase.NeutralArmed;
-                return;
-            }
+        // CHỈ XỬ LÝ MAINHAND
+        if (shouldRefillMainhand()) {
+            if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return;
 
-            int hotbarTotem = findHotbarTotem(true);
-            if (hotbarTotem == -1) hotbarTotem = findHotbarTotem(false);
-
+            // Nếu tay đang cầm đéo phải Totem, tìm Totem ở Hotbar
+            int hotbarTotem = findHotbarTotemForMainhand();
             if (hotbarTotem != -1) {
-                executeKeybindSwap(36 + hotbarTotem, 40);
+                mc.player.getInventory().setSelectedSlot(hotbarTotem);
+                syncSelected();
                 delayTimer = actionDelay.get();
                 return;
             }
 
+            // Nếu Hotbar không có, tìm trong Balo và kéo lên Hotbar
             int invTotem = findTotemInInventoryOnly();
             if (invTotem != -1) {
-                pendingSlot = invTotem;
-                pendingButton = 40;
-                transitionToOpen();
-                return;
-            }
-        }
-
-        if (shouldRefillMainhand()) {
-            int currentSelected = mc.player.getInventory().getSelectedSlot();
-            int hotbarTotem = findHotbarTotemForMainhand();
-
-            if (hotbarTotem != -1) {
-                if (hotbarSwitch.get()) {
-                    InvUtils.swap(hotbarTotem, false);
-                    delayTimer = actionDelay.get();
-                    return;
-                } else {
-                    executeKeybindSwap(36 + hotbarTotem, currentSelected);
-                    delayTimer = actionDelay.get();
+                if (grimSafe.get() && !hasSafeInventoryClickInput() && swapPhase == SwapPhase.Idle) {
+                    swapPhase = SwapPhase.NeutralArmed;
                     return;
                 }
-            }
 
-            int invTotem = findTotemInInventoryOnly();
-            if (invTotem != -1) {
-                pendingSlot = invTotem;
-                pendingButton = currentSelected;
-                transitionToOpen();
+                int currentSelected = mc.player.getInventory().getSelectedSlot();
+                if (swapTotemDirectly(invTotem, currentSelected)) {
+                    delayTimer = actionDelay.get();
+                }
             }
         }
-    }
-
-    private boolean shouldRefillOffhand() {
-        if (targetHand.get() == TargetHand.Mainhand) return false;
-        return !mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
     }
 
     private boolean shouldRefillMainhand() {
-        if (targetHand.get() == TargetHand.Offhand) return false;
         if (mc.player.getMainHandStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
+
         if (mainhandMode.get() == MainhandMode.Always) return true;
+
         float totalHp = mc.player.getHealth() + mc.player.getAbsorptionAmount();
         return totalHp <= mainhandHealth.get();
-    }
-
-    private void transitionToOpen() {
-        stage = Stage.Step2_Open;
-        if (actionDelay.get() == 0 && silentMode.get()) {
-            handleOpen();
-        } else {
-            delayTimer = actionDelay.get();
-        }
     }
 
     private void handleOpen() {
         if (silentMode.get()) {
             stage = Stage.Step3_Swap;
-            if (actionDelay.get() == 0) {
-                handleSwap();
-            } else {
-                delayTimer = actionDelay.get();
-            }
+            if (actionDelay.get() == 0) handleSwap();
+            else delayTimer = actionDelay.get();
         } else {
             if (mc.currentScreen == null) {
                 mc.setScreen(new InventoryScreen(mc.player));
@@ -377,6 +275,44 @@ public class AutoTotemVipModule extends Module {
         mc.interactionManager.clickSlot(syncId, slotId, button, SlotActionType.SWAP, mc.player);
     }
 
+    // Hàm kéo chuẩn của Klang (AutoTotem XX)
+    private boolean swapTotemDirectly(int inventoryIndex, int targetHotbarSlot) {
+        if (mc.player == null || mc.interactionManager == null) return false;
+        if (inventoryIndex < 0 || inventoryIndex > 35) return false;
+
+        ScreenHandler handler = mc.player.currentScreenHandler;
+        if (handler == null) return false;
+
+        int handlerSlot = resolvePlayerHandlerSlot(handler, inventoryIndex);
+        if (handlerSlot < 0 || handlerSlot >= handler.slots.size()) return false;
+
+        Slot source = handler.getSlot(handlerSlot);
+        if (source.inventory != mc.player.getInventory()) return false;
+        if (source.getIndex() != inventoryIndex) return false;
+        if (!source.getStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
+
+        mc.interactionManager.clickSlot(handler.syncId, handlerSlot, targetHotbarSlot, SlotActionType.SWAP, mc.player);
+        return true;
+    }
+
+    private static int resolvePlayerHandlerSlot(ScreenHandler handler, int playerInventoryIndex) {
+        for (int i = 0; i < handler.slots.size(); i++) {
+            Slot slot = handler.getSlot(i);
+            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == playerInventoryIndex) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void syncSelected() {
+        try {
+            java.lang.reflect.Method m = net.minecraft.client.network.ClientPlayerInteractionManager.class.getDeclaredMethod("syncSelectedSlot");
+            m.setAccessible(true);
+            m.invoke(mc.interactionManager);
+        } catch (Exception ignored) {}
+    }
+
     private int countInventoryTotemsOnly() {
         if (mc.player == null) return 0;
         int count = 0;
@@ -384,19 +320,6 @@ public class AutoTotemVipModule extends Module {
             if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) count++;
         }
         return count;
-    }
-
-    private int findHotbarTotem(boolean excludeCurrentSelected) {
-        if (mc.player == null) return -1;
-        int current = mc.player.getInventory().getSelectedSlot();
-        int fallback = -1;
-        for (int i = 0; i < 9; ++i) {
-            if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
-                if (i != current) return i;
-                fallback = i;
-            }
-        }
-        return excludeCurrentSelected ? -1 : fallback;
     }
 
     private int findHotbarTotemForMainhand() {
@@ -446,11 +369,6 @@ public class AutoTotemVipModule extends Module {
             player.input = neutralInput.delegate;
         }
         neutralInput = null;
-    }
-
-    private static boolean isMeteorOffhandActive() {
-        Module offhand = Modules.get().get(meteordevelopment.meteorclient.systems.modules.combat.Offhand.class);
-        return offhand != null && offhand.isActive();
     }
 
     private final class NeutralInput extends Input {
