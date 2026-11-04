@@ -22,8 +22,8 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.Vec2f;
 
-public class AutoModule extends Module {
-    private static AutoModule activeInstance;
+public class AutoTotemModule extends Module {
+    private static AutoTotemModule activeInstance;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -53,7 +53,7 @@ public class AutoModule extends Module {
     private boolean swapQueued;
     private boolean urgentPop;
 
-    public AutoModule() {
+    public AutoTotemModule() {
         super(
             TrongNhanAddon.CATEGORY,
             "auto-totem-xx",
