@@ -207,7 +207,7 @@ public class AutoTotemModule extends Module {
         if (p instanceof GameMessageS2CPacket chat) {
             log("server msg: " + chat.content().getString());
         } else if (p instanceof OverlayMessageS2CPacket ab) {
-            log("actionbar: " + ab.getMessage().getString());
+            log("actionbar: " + ab.text().getString());
         } else if (p instanceof OpenScreenS2CPacket os) {
             log("open screen id=" + os.getSyncId() + " title=" + os.getName().getString());
         } else if (p instanceof CloseScreenS2CPacket cc) {
@@ -259,7 +259,7 @@ public class AutoTotemModule extends Module {
             return;
         }
         PlayerInventory inv = mc.player.getInventory();
-        int selected = inv.selectedSlot;
+        int selected = inv.getSelectedSlot();
         ItemStack cur = inv.getStack(selected);
         if (cur.isOf(Items.TOTEM_OF_UNDYING)) return;
         if (!cur.isEmpty()) { mainhandSelectDeadlineMs = 0L; return; }
@@ -281,7 +281,7 @@ public class AutoTotemModule extends Module {
         if (!shouldManageHotbar()) return;
         if (mc.options.useKey.isPressed() || mc.player.isUsingItem()) return;
 
-        int selected = mc.player.getInventory().selectedSlot;
+        int selected = mc.player.getInventory().getSelectedSlot();
         int first = hotbarSlotFirst.get() - 1;
         int last = hotbarSlotLast.get() - 1;
 
@@ -664,7 +664,7 @@ public class AutoTotemModule extends Module {
 
     private boolean isOnKingMC() {
         if (mc.isInSingleplayer() || mc.getCurrentServerEntry() == null) return false;
-        String host = ServerAddress.parse(mc.getCurrentServerEntry().address).getHost().toLowerCase(Locale.ROOT);
+        String host = ServerAddress.parse(mc.getCurrentServerEntry().address).getAddress().toLowerCase(Locale.ROOT);
         return ALLOWED_HOSTS.contains(host);
     }
 
@@ -820,7 +820,7 @@ public class AutoTotemModule extends Module {
     }
 
     private void selectHotbarSlot(int hotbarIndex) {
-        mc.player.getInventory().selectedSlot = hotbarIndex;
+        mc.player.getInventory().setSelectedSlot(hotbarIndex);
         if (mc.getNetworkHandler() != null) {
             mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(hotbarIndex));
         }
