@@ -15,11 +15,16 @@ import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
+import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.PlayerInput;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec2f;
 
 public class AutoTotemVip extends Module {
@@ -29,7 +34,6 @@ public class AutoTotemVip extends Module {
 
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
         .name("delay")
-        .description("So tick cho giua moi lan swap sang offhand")
         .defaultValue(0)
         .min(0)
         .sliderMax(20)
@@ -39,7 +43,13 @@ public class AutoTotemVip extends Module {
     private final Setting<Boolean> yieldMeteorOffhand = sgGeneral.add(
         new BoolSetting.Builder()
             .name("yield-meteor-offhand")
-            .description("Tu dong dung khi Meteor Offhand module dang active")
+            .defaultValue(true)
+            .build()
+    );
+
+    private final Setting<Boolean> antiGhost = sgGeneral.add(
+        new BoolSetting.Builder()
+            .name("anti-ghost")
             .defaultValue(true)
             .build()
     );
@@ -52,12 +62,13 @@ public class AutoTotemVip extends Module {
 
     private boolean swapQueued;
     private boolean urgentPop;
+    private long lastGhostSync = 0;
 
     public AutoTotemVip() {
         super(
             TrongNhanAddon.CATEGORY,
             "auto-totem-vip",
-            "Automatically equips a totem directly from inventory into the offhand."
+            "Equips a totem directly from inventory into the offhand."
         );
     }
 
@@ -69,6 +80,7 @@ public class AutoTotemVip extends Module {
         swapQueued = false;
         urgentPop = false;
         neutralPlayer = null;
+        lastGhostSync = 0;
 
         restoreNeutralInput();
         super.onActivate();
@@ -107,24 +119,36 @@ public class AutoTotemVip extends Module {
         restoreNeutralInput();
         neutralPlayer = null;
 
-        swapPhase = safe
-            ? SwapPhase.NEUTRAL_READY
-            : SwapPhase.IDLE;
+        swapPhase = safe ? SwapPhase.NEUTRAL_READY : SwapPhase.IDLE;
     }
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (!(event.packet instanceof EntityStatusS2CPacket packet)) return;
-        if (packet.getStatus() != 35) return;
-        if (mc.world == null || mc.player == null) return;
-        if (packet.getEntity(mc.world) != mc.player) return;
-        if (!isActive()) return;
+        if (event.packet instanceof EntityStatusS2CPacket packet) {
+            if (packet.getStatus() == 35 && mc.world != null && mc.player != null && packet.getEntity(mc.world) == mc.player) {
+                if (isActive() && !(yieldMeteorOffhand.get() && isMeteorOffhandActive())) {
+                    urgentPop = true;
+                    swapQueued = false;
+                    cooldown = 0;
+                }
+            }
+        }
 
-        if (yieldMeteorOffhand.get() && isMeteorOffhandActive()) return;
-
-        urgentPop = true;
-        swapQueued = false;
-        cooldown = 0;
+        if (antiGhost.get() && mc.player != null && mc.getNetworkHandler() != null) {
+            if (event.packet instanceof InventoryS2CPacket || event.packet instanceof ScreenHandlerSlotUpdateS2CPacket) {
+                if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
+                    long now = System.currentTimeMillis();
+                    if (now - lastGhostSync > 1000) {
+                        lastGhostSync = now;
+                        mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                            PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+                            BlockPos.ORIGIN,
+                            Direction.DOWN
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     @EventHandler
@@ -165,13 +189,11 @@ public class AutoTotemVip extends Module {
                 urgentPop = false;
                 cooldown = delay.get();
             }
-
             swapPhase = SwapPhase.IDLE;
             return;
         }
 
-        if (swapPhase == SwapPhase.NEUTRAL_ARMED
-            || swapPhase == SwapPhase.NEUTRAL_APPLIED) {
+        if (swapPhase == SwapPhase.NEUTRAL_ARMED || swapPhase == SwapPhase.NEUTRAL_APPLIED) {
             return;
         }
 
@@ -179,136 +201,79 @@ public class AutoTotemVip extends Module {
     }
 
     private boolean swapTotemDirectlyToOffhand(int inventoryIndex) {
-        if (mc.player == null || mc.interactionManager == null) {
-            return false;
-        }
-
-        if (inventoryIndex < 0 || inventoryIndex > 35) {
-            return false;
-        }
+        if (mc.player == null || mc.interactionManager == null) return false;
+        if (inventoryIndex < 0 || inventoryIndex > 35) return false;
 
         ScreenHandler handler = mc.player.currentScreenHandler;
         if (handler == null) return false;
 
         int handlerSlot = resolvePlayerHandlerSlot(handler, inventoryIndex);
-
-        if (handlerSlot < 0 || handlerSlot >= handler.slots.size()) {
-            return false;
-        }
+        if (handlerSlot < 0 || handlerSlot >= handler.slots.size()) return false;
 
         Slot source = handler.getSlot(handlerSlot);
+        if (source.inventory != mc.player.getInventory()) return false;
+        if (source.getIndex() != inventoryIndex) return false;
+        if (!source.getStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
 
-        if (source.inventory != mc.player.getInventory()) {
-            return false;
-        }
-
-        if (source.getIndex() != inventoryIndex) {
-            return false;
-        }
-
-        if (!source.getStack().isOf(Items.TOTEM_OF_UNDYING)) {
-            return false;
-        }
-
-        mc.interactionManager.clickSlot(
-            handler.syncId,
-            handlerSlot,
-            40,
-            SlotActionType.SWAP,
-            mc.player
-        );
-
+        mc.interactionManager.clickSlot(handler.syncId, handlerSlot, 40, SlotActionType.SWAP, mc.player);
         return true;
     }
 
     private int findTotemSlot() {
         if (mc.player == null) return -1;
-
         PlayerInventory inventory = mc.player.getInventory();
-
         for (int i = 0; i < 36; i++) {
             if (inventory.getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
                 return i;
             }
         }
-
         return -1;
     }
 
     private void ensureNeutralInput() {
         ClientPlayerEntity player = mc.player;
-
         if (player == null || player.hasVehicle()) return;
-
-        if (neutralInput != null && player.input == neutralInput) {
-            return;
-        }
-
+        if (neutralInput != null && player.input == neutralInput) return;
         neutralInput = new NeutralInput(player.input);
         player.input = neutralInput;
     }
 
     private void restoreNeutralInput() {
         ClientPlayerEntity player = mc.player;
-
-        if (player != null
-            && neutralInput != null
-            && player.input == neutralInput) {
-
+        if (player != null && neutralInput != null && player.input == neutralInput) {
             player.input = neutralInput.delegate;
         }
-
         neutralInput = null;
     }
 
     private boolean hasSafeInventoryClickInput() {
         ClientPlayerEntity player = mc.player;
-
-        if (player == null || player.isSprinting()) {
-            return false;
-        }
+        if (player == null || player.isSprinting()) return false;
 
         Input input = player.input;
         if (input == null) return true;
 
         Vec2f movement = input.getMovementInput();
-
-        if (movement != null
-            && movement.lengthSquared() > 1.0E-5f) {
-            return false;
-        }
+        if (movement != null && movement.lengthSquared() > 1.0E-5f) return false;
 
         PlayerInput playerInput = input.playerInput;
-
-        return playerInput == null
-            || !(playerInput.forward()
-                || playerInput.backward()
-                || playerInput.left()
-                || playerInput.right());
+        return playerInput == null || !(playerInput.forward() || playerInput.backward() || playerInput.left() || playerInput.right());
     }
 
-    private static int resolvePlayerHandlerSlot(
-        ScreenHandler handler,
-        int playerInventoryIndex
-    ) {
+    private static int resolvePlayerHandlerSlot(ScreenHandler handler, int playerInventoryIndex) {
         for (int i = 0; i < handler.slots.size(); i++) {
             Slot slot = handler.getSlot(i);
-
-            if (slot.inventory instanceof PlayerInventory
-                && slot.getIndex() == playerInventoryIndex) {
+            if (slot.inventory instanceof PlayerInventory && slot.getIndex() == playerInventoryIndex) {
                 return i;
             }
         }
-
         return -1;
     }
 
     private static boolean isMeteorOffhandActive() {
-        Module offhand =
-            meteordevelopment.meteorclient.systems.modules.Modules.get().get(
-                meteordevelopment.meteorclient.systems.modules.combat.Offhand.class
-            );
-
+        Module offhand = meteordevelopment.meteorclient.systems.modules.Modules.get().get(
+            meteordevelopment.meteorclient.systems.modules.combat.Offhand.class
+        );
         return offhand != null && offhand.isActive();
     }
 
@@ -318,7 +283,6 @@ public class AutoTotemVip extends Module {
         swapQueued = false;
         urgentPop = false;
         neutralPlayer = null;
-
         restoreNeutralInput();
     }
 
@@ -334,39 +298,19 @@ public class AutoTotemVip extends Module {
 
         private NeutralInput(Input delegate) {
             this.delegate = delegate;
-
-            setState(
-                delegate.playerInput,
-                delegate.getMovementInput()
-            );
+            setState(delegate.playerInput, delegate.getMovementInput());
         }
 
         @Override
         public void tick() {
             delegate.tick();
 
-            PlayerInput original = delegate.playerInput == null
-                ? PlayerInput.DEFAULT
-                : delegate.playerInput;
-
+            PlayerInput original = delegate.playerInput == null ? PlayerInput.DEFAULT : delegate.playerInput;
             setState(original, delegate.getMovementInput());
 
-            if (swapPhase != SwapPhase.NEUTRAL_ARMED
-                || mc.player == null
-                || mc.player.input != this) {
-                return;
-            }
+            if (swapPhase != SwapPhase.NEUTRAL_ARMED || mc.player == null || mc.player.input != this) return;
 
-            PlayerInput neutral = new PlayerInput(
-                false,
-                false,
-                false,
-                false,
-                false,
-                original.sneak(),
-                false
-            );
-
+            PlayerInput neutral = new PlayerInput(false, false, false, false, false, original.sneak(), false);
             setState(neutral, Vec2f.ZERO);
 
             mc.player.setSprinting(false);
@@ -375,13 +319,8 @@ public class AutoTotemVip extends Module {
         }
 
         private void setState(PlayerInput input, Vec2f movement) {
-            playerInput = input == null
-                ? PlayerInput.DEFAULT
-                : input;
-
-            movementVector = movement == null
-                ? Vec2f.ZERO
-                : movement;
+            playerInput = input == null ? PlayerInput.DEFAULT : input;
+            movementVector = movement == null ? Vec2f.ZERO : movement;
         }
     }
 }
