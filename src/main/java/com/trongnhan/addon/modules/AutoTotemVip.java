@@ -34,6 +34,7 @@ public class AutoTotemVip extends Module {
 
     private final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
         .name("delay")
+        .description("So tick cho giua moi lan swap sang offhand")
         .defaultValue(0)
         .min(0)
         .sliderMax(20)
@@ -43,13 +44,16 @@ public class AutoTotemVip extends Module {
     private final Setting<Boolean> yieldMeteorOffhand = sgGeneral.add(
         new BoolSetting.Builder()
             .name("yield-meteor-offhand")
+            .description("Tu dong dung khi Meteor Offhand module dang active")
             .defaultValue(true)
             .build()
     );
 
+    // SETTING ANTI-GHOST
     private final Setting<Boolean> antiGhost = sgGeneral.add(
         new BoolSetting.Builder()
             .name("anti-ghost")
+            .description("Ép server đồng bộ lại totem tay trái (Chống ảo ma).")
             .defaultValue(true)
             .build()
     );
@@ -68,7 +72,7 @@ public class AutoTotemVip extends Module {
         super(
             TrongNhanAddon.CATEGORY,
             "auto-totem-vip",
-            "Equips a totem directly from inventory into the offhand."
+            "Automatically equips a totem directly from inventory into the offhand."
         );
     }
 
@@ -124,6 +128,7 @@ public class AutoTotemVip extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
+        // 1. LOGIC AUTO TOTEM KHI POP
         if (event.packet instanceof EntityStatusS2CPacket packet) {
             if (packet.getStatus() == 35 && mc.world != null && mc.player != null && packet.getEntity(mc.world) == mc.player) {
                 if (isActive() && !(yieldMeteorOffhand.get() && isMeteorOffhandActive())) {
@@ -134,8 +139,10 @@ public class AutoTotemVip extends Module {
             }
         }
 
+        // 2. LOGIC ANTI-GHOST (CHỐNG ẢO MA TOTEM)
         if (antiGhost.get() && mc.player != null && mc.getNetworkHandler() != null) {
             if (event.packet instanceof InventoryS2CPacket || event.packet instanceof ScreenHandlerSlotUpdateS2CPacket) {
+                // Chỉ sync nếu tay trái đang cầm Totem và đã qua ít nhất 1 giây kể từ lần trước để tránh spam kick
                 if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
                     long now = System.currentTimeMillis();
                     if (now - lastGhostSync > 1000) {
@@ -189,6 +196,7 @@ public class AutoTotemVip extends Module {
                 urgentPop = false;
                 cooldown = delay.get();
             }
+
             swapPhase = SwapPhase.IDLE;
             return;
         }
