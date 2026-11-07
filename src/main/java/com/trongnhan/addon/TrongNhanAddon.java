@@ -2,7 +2,6 @@ package com.trongnhan.addon;
 
 import com.mojang.logging.LogUtils;
 import com.trongnhan.addon.modules.AutoTotemVip;
-import com.trongnhan.addon.utils.GrimCombatCoordinator;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -15,7 +14,6 @@ public class TrongNhanAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         LOG.info("Initializing TrongNhan Addon");
-        GrimCombatCoordinator.install();
         Modules.get().add(new AutoTotemVip());
     }
 
