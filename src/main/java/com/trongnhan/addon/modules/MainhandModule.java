@@ -44,10 +44,10 @@ public class MainhandModule extends Module {
         .defaultValue(3).min(1).max(9).sliderMin(1).sliderMax(9)
         .visible(mainhandMode::get).build());
 
-    public final Setting<Integer> actionDelay = sgMainhand.add(new IntSetting.Builder()
-        .name("delay")
-        .description("Delay (ms) truoc khi keo Totem xuong Hotbar.")
-        .defaultValue(40).min(0).sliderMax(500)
+    public final Setting<Integer> cooldownTicks = sgMainhand.add(new IntSetting.Builder()
+        .name("cooldown")
+        .description("Thoi gian cho (ticks) giua moi lan keo Totem (20 ticks = 1s).")
+        .defaultValue(20).min(0).sliderMax(100)
         .visible(mainhandMode::get).build());
 
     public final Setting<Boolean> antiGhost = sgGeneral.add(new BoolSetting.Builder()
@@ -67,7 +67,7 @@ public class MainhandModule extends Module {
 
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     
-    private long lastActionTime = 0;
+    private int tickTimer = 0;
     private long lastGhostSync = 0;
     private int lastInventoryTotemCount = -1;
     private int currentTargetSlot = -1;
@@ -78,7 +78,7 @@ public class MainhandModule extends Module {
 
     @Override
     public void onActivate() {
-        lastActionTime = System.currentTimeMillis();
+        tickTimer = 0;
         currentTargetSlot = Math.min(minSlot.get(), maxSlot.get()) - 1;
         lastInventoryTotemCount = -1;
     }
@@ -126,8 +126,10 @@ public class MainhandModule extends Module {
 
         if (!mainhandMode.get()) return;
 
-        long now = System.currentTimeMillis();
-        if (now - lastActionTime < actionDelay.get()) return;
+        if (tickTimer > 0) {
+            tickTimer--;
+            return;
+        }
 
         int min = Math.min(minSlot.get(), maxSlot.get()) - 1;
         int max = Math.max(minSlot.get(), maxSlot.get()) - 1;
@@ -136,34 +138,52 @@ public class MainhandModule extends Module {
 
         boolean slotHasTotem = mc.player.getInventory().getStack(currentTargetSlot).isOf(Items.TOTEM_OF_UNDYING);
 
+        // 1. Kéo Totem từ Balo xuống slot Min-Max
         if (!slotHasTotem) {
             int invTotem = findTotemInInventoryOnly();
             if (invTotem != -1) {
                 if (swapTotemDirectly(invTotem, currentTargetSlot)) {
-                    lastActionTime = now;
-                    if (currentTargetSlot < max) currentTargetSlot++;
-                    else currentTargetSlot = min;
+                    tickTimer = cooldownTicks.get();
+                    advanceTargetSlot(min, max);
+                    return;
                 }
             }
-        } else {
+        }
+
+        // 2. Check slot Max (Nếu đang ở slot nhỏ hơn Max mà Max trống)
+        if (currentTargetSlot < max && !mc.player.getInventory().getStack(max).isOf(Items.TOTEM_OF_UNDYING)) {
+            int invTotem = findTotemInInventoryOnly();
+            if (invTotem != -1) {
+                if (swapTotemDirectly(invTotem, max)) {
+                    tickTimer = cooldownTicks.get();
+                    advanceTargetSlot(min, max);
+                    return;
+                }
+            }
+        }
+
+        // 3. Nếu Balo HẾT SẠCH TOTEM -> Tự cầm các Totem đang có trên Hotbar
+        if (findTotemInInventoryOnly() == -1) {
             int selectedSlot = mc.player.getInventory().getSelectedSlot();
             if (!mc.player.getInventory().getStack(selectedSlot).isOf(Items.TOTEM_OF_UNDYING)) {
-                boolean found = false;
-                for (int i = min; i <= max; i++) {
+                // Quét toàn bộ 9 slot hotbar (0-8), thấy đâu cầm đó
+                for (int i = 0; i <= 8; i++) {
                     if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
                         mc.player.getInventory().setSelectedSlot(i);
                         syncSelected();
-                        lastActionTime = now;
-                        found = true;
+                        tickTimer = 2; // Delay 2 tick cho mượt
                         break;
                     }
                 }
-                if (!found && mc.player.getInventory().getStack(min).isOf(Items.TOTEM_OF_UNDYING)) {
-                    mc.player.getInventory().setSelectedSlot(min);
-                    syncSelected();
-                    lastActionTime = now;
-                }
             }
+        }
+    }
+
+    private void advanceTargetSlot(int min, int max) {
+        if (currentTargetSlot < max) {
+            currentTargetSlot++;
+        } else {
+            currentTargetSlot = min;
         }
     }
 
