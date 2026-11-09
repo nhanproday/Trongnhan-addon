@@ -2,7 +2,6 @@ package com.trongnhan.addon;
 
 import com.mojang.logging.LogUtils;
 import com.trongnhan.addon.modules.AutoTotemVip;
-import com.trongnhan.addon.modules.MainhandModule;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
