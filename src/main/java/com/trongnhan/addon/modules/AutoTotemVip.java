@@ -45,13 +45,15 @@ public class AutoTotemVip extends Module {
     );
 
     private int cooldown;
-    private SwapPhase swapPhase = SwapPhase.IDLE;
+    private boolean swapQueued;
+    private boolean urgentPop;
 
     private ClientPlayerEntity neutralPlayer;
     private NeutralInput neutralInput;
+    private boolean neutralArmed;
 
-    private boolean swapQueued;
-    private boolean urgentPop;
+    private int lastTotemSlot = -1;
+    private int lastHandlerSyncId = -1;
 
     public AutoTotemVip() {
         super(
@@ -64,40 +66,26 @@ public class AutoTotemVip extends Module {
     @Override
     public void onActivate() {
         activeInstance = this;
-        cooldown = 0;
-        swapPhase = SwapPhase.IDLE;
-        swapQueued = false;
-        urgentPop = false;
-        neutralPlayer = null;
-
-        restoreNeutralInput();
+        resetPendingState();
         super.onActivate();
     }
 
     @Override
     public void onDeactivate() {
         if (activeInstance == this) activeInstance = null;
-
-        cooldown = 0;
-        swapPhase = SwapPhase.IDLE;
-        swapQueued = false;
-        urgentPop = false;
-        neutralPlayer = null;
-
-        restoreNeutralInput();
+        resetPendingState();
         super.onDeactivate();
     }
 
     @EventHandler(priority = -10000)
     private void onPlayerTickMovement(PlayerTickMovementEvent event) {
-        if (swapPhase == SwapPhase.NEUTRAL_ARMED) {
-            ensureNeutralInput();
-        }
+        if (!neutralArmed) return;
+        ensureNeutralInput();
     }
 
     @EventHandler(priority = 10000)
     private void onSendMovementPacketsPost(SendMovementPacketsEvent.Post event) {
-        if (swapPhase != SwapPhase.NEUTRAL_APPLIED) return;
+        if (!neutralArmed || neutralInput == null) return;
 
         boolean safe = hasSafeInventoryClickInput()
             && mc.player == neutralPlayer
@@ -106,10 +94,11 @@ public class AutoTotemVip extends Module {
 
         restoreNeutralInput();
         neutralPlayer = null;
+        neutralArmed = false;
 
-        swapPhase = safe
-            ? SwapPhase.NEUTRAL_READY
-            : SwapPhase.IDLE;
+        if (safe) {
+            attemptDirectSwap();
+        }
     }
 
     @EventHandler
@@ -119,7 +108,6 @@ public class AutoTotemVip extends Module {
         if (mc.world == null || mc.player == null) return;
         if (packet.getEntity(mc.world) != mc.player) return;
         if (!isActive()) return;
-
         if (yieldMeteorOffhand.get() && isMeteorOffhandActive()) return;
 
         urgentPop = true;
@@ -134,7 +122,6 @@ public class AutoTotemVip extends Module {
             || mc.interactionManager == null
             || mc.player.isCreative()
             || mc.player.isSpectator()) {
-
             resetPendingState();
             return;
         }
@@ -144,7 +131,13 @@ public class AutoTotemVip extends Module {
         if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             urgentPop = false;
             swapQueued = false;
-            swapPhase = SwapPhase.IDLE;
+            neutralArmed = false;
+            restoreNeutralInput();
+            return;
+        }
+
+        if (swapQueued) {
+            swapQueued = false;
             return;
         }
 
@@ -154,28 +147,37 @@ public class AutoTotemVip extends Module {
         }
 
         if (urgentPop) cooldown = 0;
-        if (swapQueued) return;
 
-        int totemIndex = findTotemSlot();
-        if (totemIndex < 0) return;
+        if (neutralArmed) return;
 
-        if (swapPhase == SwapPhase.NEUTRAL_READY) {
-            if (swapTotemDirectlyToOffhand(totemIndex)) {
-                swapQueued = true;
-                urgentPop = false;
-                cooldown = delay.get();
-            }
-
-            swapPhase = SwapPhase.IDLE;
+        int totemSlot = findTotemSlot();
+        if (totemSlot < 0) {
+            lastTotemSlot = -1;
             return;
         }
 
-        if (swapPhase == SwapPhase.NEUTRAL_ARMED
-            || swapPhase == SwapPhase.NEUTRAL_APPLIED) {
+        lastTotemSlot = totemSlot;
+
+        if (hasSafeInventoryClickInput()) {
+            attemptDirectSwap();
             return;
         }
 
-        swapPhase = SwapPhase.NEUTRAL_ARMED;
+        neutralArmed = true;
+        ensureNeutralInput();
+    }
+
+    private void attemptDirectSwap() {
+        if (mc.player == null || mc.interactionManager == null) return;
+
+        int totemSlot = lastTotemSlot >= 0 ? lastTotemSlot : findTotemSlot();
+        if (totemSlot < 0) return;
+
+        if (!swapTotemDirectlyToOffhand(totemSlot)) return;
+
+        swapQueued = true;
+        urgentPop = false;
+        cooldown = delay.get();
     }
 
     private boolean swapTotemDirectlyToOffhand(int inventoryIndex) {
@@ -191,7 +193,6 @@ public class AutoTotemVip extends Module {
         if (handler == null) return false;
 
         int handlerSlot = resolvePlayerHandlerSlot(handler, inventoryIndex);
-
         if (handlerSlot < 0 || handlerSlot >= handler.slots.size()) {
             return false;
         }
@@ -210,6 +211,10 @@ public class AutoTotemVip extends Module {
             return false;
         }
 
+        if (handler.getCursorStack() != null && !handler.getCursorStack().isEmpty()) {
+            return false;
+        }
+
         mc.interactionManager.clickSlot(
             handler.syncId,
             handlerSlot,
@@ -217,6 +222,8 @@ public class AutoTotemVip extends Module {
             SlotActionType.SWAP,
             mc.player
         );
+
+        lastHandlerSyncId = handler.syncId;
 
         return true;
     }
@@ -238,7 +245,10 @@ public class AutoTotemVip extends Module {
     private void ensureNeutralInput() {
         ClientPlayerEntity player = mc.player;
 
-        if (player == null || player.hasVehicle()) return;
+        if (player == null || player.hasVehicle()) {
+            neutralArmed = false;
+            return;
+        }
 
         if (neutralInput != null && player.input == neutralInput) {
             return;
@@ -246,6 +256,7 @@ public class AutoTotemVip extends Module {
 
         neutralInput = new NeutralInput(player.input);
         player.input = neutralInput;
+        neutralPlayer = player;
     }
 
     private void restoreNeutralInput() {
@@ -254,7 +265,6 @@ public class AutoTotemVip extends Module {
         if (player != null
             && neutralInput != null
             && player.input == neutralInput) {
-
             player.input = neutralInput.delegate;
         }
 
@@ -273,8 +283,7 @@ public class AutoTotemVip extends Module {
 
         Vec2f movement = input.getMovementInput();
 
-        if (movement != null
-            && movement.lengthSquared() > 1.0E-5f) {
+        if (movement != null && movement.lengthSquared() > 1.0E-5f) {
             return false;
         }
 
@@ -314,19 +323,14 @@ public class AutoTotemVip extends Module {
 
     private void resetPendingState() {
         cooldown = 0;
-        swapPhase = SwapPhase.IDLE;
         swapQueued = false;
         urgentPop = false;
+        neutralArmed = false;
         neutralPlayer = null;
+        lastTotemSlot = -1;
+        lastHandlerSyncId = -1;
 
         restoreNeutralInput();
-    }
-
-    private enum SwapPhase {
-        IDLE,
-        NEUTRAL_ARMED,
-        NEUTRAL_APPLIED,
-        NEUTRAL_READY
     }
 
     private final class NeutralInput extends Input {
@@ -351,7 +355,7 @@ public class AutoTotemVip extends Module {
 
             setState(original, delegate.getMovementInput());
 
-            if (swapPhase != SwapPhase.NEUTRAL_ARMED
+            if (!neutralArmed
                 || mc.player == null
                 || mc.player.input != this) {
                 return;
@@ -370,18 +374,11 @@ public class AutoTotemVip extends Module {
             setState(neutral, Vec2f.ZERO);
 
             mc.player.setSprinting(false);
-            neutralPlayer = mc.player;
-            swapPhase = SwapPhase.NEUTRAL_APPLIED;
         }
 
         private void setState(PlayerInput input, Vec2f movement) {
-            playerInput = input == null
-                ? PlayerInput.DEFAULT
-                : input;
-
-            movementVector = movement == null
-                ? Vec2f.ZERO
-                : movement;
+            playerInput = input == null ? PlayerInput.DEFAULT : input;
+            movementVector = movement == null ? Vec2f.ZERO : movement;
         }
     }
 }
