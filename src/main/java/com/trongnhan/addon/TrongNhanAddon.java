@@ -18,7 +18,6 @@ public class TrongNhanAddon extends MeteorAddon {
         
         // Load các module
         Modules.get().add(new AutoTotemVip());
-        Modules.get().add(new MainhandModule());
     }
 
     @Override
