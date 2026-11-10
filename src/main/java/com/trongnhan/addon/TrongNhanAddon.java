@@ -2,6 +2,7 @@ package com.trongnhan.addon;
 
 import com.mojang.logging.LogUtils;
 import com.trongnhan.addon.modules.AutoTotemVip;
+import com.trongnhan.addon.modules.MainhandModule;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
@@ -17,6 +18,7 @@ public class TrongNhanAddon extends MeteorAddon {
         
         // Load các module
         Modules.get().add(new AutoTotemVip());
+        Modules.get().add(new MainhandModule());
     }
 
     @Override
