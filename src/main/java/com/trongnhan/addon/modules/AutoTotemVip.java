@@ -24,6 +24,7 @@ import net.minecraft.util.math.Vec2f;
 
 public class AutoTotemVip extends Module {
     private static AutoTotemVip activeInstance;
+    private static boolean priorityLock;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -44,6 +45,14 @@ public class AutoTotemVip extends Module {
             .build()
     );
 
+    private final Setting<Boolean> holdPriority = sgGeneral.add(
+        new BoolSetting.Builder()
+            .name("hold-priority")
+            .description("Giu quyen uu tien khi dang thao tac offhand")
+            .defaultValue(true)
+            .build()
+    );
+
     private int cooldown;
     private boolean swapQueued;
     private boolean urgentPop;
@@ -53,7 +62,7 @@ public class AutoTotemVip extends Module {
     private boolean neutralArmed;
 
     private int lastTotemSlot = -1;
-    private int lastHandlerSyncId = -1;
+    private int awaitVerifyTicks = -1;
 
     public AutoTotemVip() {
         super(
@@ -61,6 +70,14 @@ public class AutoTotemVip extends Module {
             "auto-totem-vip",
             "Automatically equips a totem directly from inventory into the offhand."
         );
+    }
+
+    public static boolean isPriorityLocked() {
+        return priorityLock;
+    }
+
+    public static boolean isInstanceActive() {
+        return activeInstance != null && activeInstance.isActive();
     }
 
     @Override
@@ -73,6 +90,7 @@ public class AutoTotemVip extends Module {
     @Override
     public void onDeactivate() {
         if (activeInstance == this) activeInstance = null;
+        priorityLock = false;
         resetPendingState();
         super.onDeactivate();
     }
@@ -126,12 +144,38 @@ public class AutoTotemVip extends Module {
             return;
         }
 
-        if (yieldMeteorOffhand.get() && isMeteorOffhandActive()) return;
+        if (yieldMeteorOffhand.get() && isMeteorOffhandActive()) {
+            priorityLock = false;
+            return;
+        }
+
+        if (awaitVerifyTicks >= 0) {
+            if (awaitVerifyTicks > 0) {
+                awaitVerifyTicks--;
+                priorityLock = true;
+                return;
+            }
+
+            awaitVerifyTicks = -1;
+
+            if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
+                priorityLock = false;
+                swapQueued = false;
+                urgentPop = false;
+                cooldown = delay.get();
+                return;
+            }
+
+            priorityLock = false;
+            urgentPop = true;
+            cooldown = 0;
+        }
 
         if (mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
             urgentPop = false;
             swapQueued = false;
             neutralArmed = false;
+            priorityLock = false;
             restoreNeutralInput();
             return;
         }
@@ -153,6 +197,7 @@ public class AutoTotemVip extends Module {
         int totemSlot = findTotemSlot();
         if (totemSlot < 0) {
             lastTotemSlot = -1;
+            priorityLock = false;
             return;
         }
 
@@ -164,6 +209,7 @@ public class AutoTotemVip extends Module {
         }
 
         neutralArmed = true;
+        priorityLock = true;
         ensureNeutralInput();
     }
 
@@ -177,6 +223,8 @@ public class AutoTotemVip extends Module {
 
         swapQueued = true;
         urgentPop = false;
+        priorityLock = true;
+        awaitVerifyTicks = 3;
         cooldown = delay.get();
     }
 
@@ -222,8 +270,6 @@ public class AutoTotemVip extends Module {
             SlotActionType.SWAP,
             mc.player
         );
-
-        lastHandlerSyncId = handler.syncId;
 
         return true;
     }
@@ -328,7 +374,7 @@ public class AutoTotemVip extends Module {
         neutralArmed = false;
         neutralPlayer = null;
         lastTotemSlot = -1;
-        lastHandlerSyncId = -1;
+        awaitVerifyTicks = -1;
 
         restoreNeutralInput();
     }
