@@ -16,6 +16,8 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 
 public class MainhandModule extends Module {
+    public enum RefillMode { Immediate }
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgHeal = settings.createGroup("Heal");
     private final SettingGroup sgExtras = settings.createGroup("Extras");
@@ -30,9 +32,9 @@ public class MainhandModule extends Module {
         .defaultValue(500).min(0).sliderMax(2000)
         .build());
 
-    public final Setting<String> refillMode = sgGeneral.add(new EnumSetting.Builder<String>()
+    public final Setting<RefillMode> refillMode = sgGeneral.add(new EnumSetting.Builder<RefillMode>()
         .name("refill-mode")
-        .defaultValue("Immediate").values("Immediate")
+        .defaultValue(RefillMode.Immediate)
         .build());
 
     public final Setting<Boolean> heal = sgHeal.add(new BoolSetting.Builder()
@@ -71,7 +73,6 @@ public class MainhandModule extends Module {
     private long lastActionTime = 0;
     private int lastInventoryTotemCount = -1;
     private int lastTargetSlot = -1;
-    private int gappleStagedSlot = -1;
     private boolean eatingHotbar = false;
     private int previousHotbarSlot = -1;
 
@@ -84,7 +85,6 @@ public class MainhandModule extends Module {
         lastActionTime = System.currentTimeMillis();
         lastInventoryTotemCount = -1;
         lastTargetSlot = -1;
-        gappleStagedSlot = -1;
         eatingHotbar = false;
         previousHotbarSlot = -1;
     }
