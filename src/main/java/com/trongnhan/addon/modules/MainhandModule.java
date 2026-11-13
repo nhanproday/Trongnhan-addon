@@ -15,26 +15,44 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 
+import java.util.Random;
+
 public class MainhandModule extends Module {
     public enum RefillMode { Immediate }
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgSlots = settings.createGroup("Slots");
     private final SettingGroup sgHeal = settings.createGroup("Heal");
     private final SettingGroup sgExtras = settings.createGroup("Extras");
 
-    public final Setting<Integer> slot = sgGeneral.add(new IntSetting.Builder()
-        .name("slot")
-        .defaultValue(5).min(1).max(9).sliderMin(1).sliderMax(9)
+    public final Setting<Integer> minDelay = sgGeneral.add(new IntSetting.Builder()
+        .name("min-delay")
+        .defaultValue(3000).min(0).sliderMax(5000)
         .build());
 
-    public final Setting<Integer> delay = sgGeneral.add(new IntSetting.Builder()
-        .name("delay")
-        .defaultValue(500).min(0).sliderMax(2000)
+    public final Setting<Integer> maxDelay = sgGeneral.add(new IntSetting.Builder()
+        .name("max-delay")
+        .defaultValue(4000).min(0).sliderMax(5000)
+        .build());
+
+    public final Setting<Integer> switchDelay = sgGeneral.add(new IntSetting.Builder()
+        .name("switch-delay")
+        .defaultValue(1000).min(0).sliderMax(5000)
         .build());
 
     public final Setting<RefillMode> refillMode = sgGeneral.add(new EnumSetting.Builder<RefillMode>()
         .name("refill-mode")
         .defaultValue(RefillMode.Immediate)
+        .build());
+
+    public final Setting<Integer> slot1 = sgSlots.add(new IntSetting.Builder()
+        .name("slot-1")
+        .defaultValue(1).min(1).max(9).sliderMin(1).sliderMax(9)
+        .build());
+
+    public final Setting<Integer> slot2 = sgSlots.add(new IntSetting.Builder()
+        .name("slot-2")
+        .defaultValue(2).min(1).max(9).sliderMin(1).sliderMax(9)
         .build());
 
     public final Setting<Boolean> heal = sgHeal.add(new BoolSetting.Builder()
@@ -70,11 +88,12 @@ public class MainhandModule extends Module {
 
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     
-    private long lastActionTime = 0;
-    private int lastInventoryTotemCount = -1;
-    private int lastTargetSlot = -1;
+    private final long[] slotCooldowns = new long[9];
+    private final Random random = new Random();
     private boolean eatingHotbar = false;
     private int previousHotbarSlot = -1;
+    private int awaitVerifyTicks = -1;
+    private long lastSwitchTime = 0;
 
     public MainhandModule() {
         super(TrongNhanAddon.CATEGORY, "mainhand", "Auto Totem (Mainhand) + Heal & Extras.");
@@ -82,11 +101,11 @@ public class MainhandModule extends Module {
 
     @Override
     public void onActivate() {
-        lastActionTime = System.currentTimeMillis();
-        lastInventoryTotemCount = -1;
-        lastTargetSlot = -1;
+        for (int i = 0; i < 9; i++) slotCooldowns[i] = 0;
         eatingHotbar = false;
         previousHotbarSlot = -1;
+        awaitVerifyTicks = -1;
+        lastSwitchTime = 0;
     }
 
     @Override
@@ -109,24 +128,15 @@ public class MainhandModule extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.player.isCreative() || mc.player.isSpectator()) return;
 
-        int currentInvTotems = countInventoryTotemsOnly();
-        if (chatNotify.get() && lastInventoryTotemCount != -1 && currentInvTotems < lastInventoryTotemCount) {
-            if (currentInvTotems <= 5) {
-                ChatUtils.sendMsg(Text.literal("§fCANH BAO: Kho do chi con §e" + currentInvTotems + " §fTotem!"));
-                if (chatNotify.get()) mc.player.playSound(SoundEvents.ENTITY_IRON_GOLEM_HURT, 1.0F, 0.6F);
+        if (awaitVerifyTicks >= 0) {
+            if (awaitVerifyTicks > 0) {
+                awaitVerifyTicks--;
+                return;
             }
+            awaitVerifyTicks = -1;
         }
-        lastInventoryTotemCount = currentInvTotems;
 
         long now = System.currentTimeMillis();
-        if (now - lastActionTime < delay.get()) return;
-
-        int target = slot.get() - 1;
-
-        if (lastTargetSlot != target) {
-            lastTargetSlot = target;
-            lastActionTime = now;
-        }
 
         if (useGapple.get() && mc.options.useKey.isPressed() && rightClickEat.get()) {
             int gapSlot = findGappleHotbar();
@@ -136,7 +146,6 @@ public class MainhandModule extends Module {
                     mc.player.getInventory().setSelectedSlot(gapSlot);
                     syncSelected();
                     eatingHotbar = true;
-                    lastActionTime = now;
                     return;
                 }
             }
@@ -144,7 +153,6 @@ public class MainhandModule extends Module {
             if (previousHotbarSlot != -1) {
                 mc.player.getInventory().setSelectedSlot(previousHotbarSlot);
                 syncSelected();
-                lastActionTime = now;
             }
             eatingHotbar = false;
             previousHotbarSlot = -1;
@@ -152,36 +160,91 @@ public class MainhandModule extends Module {
 
         if (eatingHotbar) return;
 
-        if (needsTotem()) {
-            int hotbarTotem = findHotbarTotemForMainhand();
-            if (hotbarTotem != -1 && hotbarTotem != target) {
-                swapTotemDirectly(36 + hotbarTotem, target);
-                lastActionTime = now;
+        boolean need = needsTotem();
+        if (!need) return;
+
+        int targetA = slot1.get() - 1;
+        int targetB = slot2.get() - 1;
+
+        boolean aHas = mc.player.getInventory().getStack(targetA).isOf(Items.TOTEM_OF_UNDYING);
+        boolean bHas = mc.player.getInventory().getStack(targetB).isOf(Items.TOTEM_OF_UNDYING);
+
+        if (aHas || bHas) {
+            int selected = mc.player.getInventory().getSelectedSlot();
+            int targetSlot = aHas ? targetA : targetB;
+            if (selected != targetSlot) {
+                if (now - lastSwitchTime >= switchDelay.get()) {
+                    mc.player.getInventory().setSelectedSlot(targetSlot);
+                    syncSelected();
+                    lastSwitchTime = now;
+                }
+            }
+            return;
+        }
+
+        boolean anyHotbarTotem = false;
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) {
+                anyHotbarTotem = true;
+                if (mc.player.getInventory().getSelectedSlot() != i) {
+                    if (now - lastSwitchTime >= switchDelay.get()) {
+                        mc.player.getInventory().setSelectedSlot(i);
+                        syncSelected();
+                        lastSwitchTime = now;
+                    }
+                }
+                break;
             }
         }
 
-        boolean slotHasTotem = mc.player.getInventory().getStack(target).isOf(Items.TOTEM_OF_UNDYING);
+        if (anyHotbarTotem) return;
 
-        if (!slotHasTotem) {
-            int invTotem = findTotemInInventoryOnly();
-            if (invTotem != -1) {
-                if (swapTotemDirectly(invTotem, target)) {
-                    lastActionTime = now;
-                    mc.player.getInventory().setSelectedSlot(target);
+        int invTotem = findTotemInInventoryOnly();
+        if (invTotem == -1) {
+            slotCooldowns[targetA] = 0;
+            slotCooldowns[targetB] = 0;
+            return;
+        }
+
+        if (slotCooldowns[targetA] == 0) {
+            slotCooldowns[targetA] = now + getRandomDelay();
+        }
+        if (slotCooldowns[targetB] == 0) {
+            slotCooldowns[targetB] = now + getRandomDelay();
+        }
+
+        if (now >= slotCooldowns[targetA]) {
+            if (swapTotemDirectly(invTotem, targetA)) {
+                slotCooldowns[targetA] = 0;
+                awaitVerifyTicks = 3;
+                if (now - lastSwitchTime >= switchDelay.get()) {
+                    mc.player.getInventory().setSelectedSlot(targetA);
                     syncSelected();
-                    return;
+                    lastSwitchTime = now;
                 }
-            }
-        } else {
-            int selectedSlot = mc.player.getInventory().getSelectedSlot();
-            if (selectedSlot != target && !eatingHotbar) {
-                if (needsTotem()) {
-                    mc.player.getInventory().setSelectedSlot(target);
-                    syncSelected();
-                    lastActionTime = now;
-                }
+                return;
             }
         }
+        
+        if (now >= slotCooldowns[targetB]) {
+            if (swapTotemDirectly(invTotem, targetB)) {
+                slotCooldowns[targetB] = 0;
+                awaitVerifyTicks = 3;
+                if (now - lastSwitchTime >= switchDelay.get()) {
+                    mc.player.getInventory().setSelectedSlot(targetB);
+                    syncSelected();
+                    lastSwitchTime = now;
+                }
+                return;
+            }
+        }
+    }
+
+    private long getRandomDelay() {
+        int min = Math.min(minDelay.get(), maxDelay.get());
+        int max = Math.max(minDelay.get(), maxDelay.get());
+        if (min == max) return min;
+        return min + random.nextInt(max - min + 1);
     }
 
     private boolean needsTotem() {
@@ -201,7 +264,9 @@ public class MainhandModule extends Module {
         if (handlerSlot < 0 || handlerSlot >= handler.slots.size()) return false;
 
         Slot source = handler.getSlot(handlerSlot);
-        if (source.inventory != mc.player.getInventory() || source.getIndex() != inventoryIndex) return false;
+        if (source.inventory != mc.player.getInventory() || source.getIndex() != inventoryIndex || !source.getStack().isOf(Items.TOTEM_OF_UNDYING)) return false;
+        
+        if (handler.getCursorStack() != null && !handler.getCursorStack().isEmpty()) return false;
 
         mc.interactionManager.clickSlot(handler.syncId, handlerSlot, targetHotbarSlot, SlotActionType.SWAP, mc.player);
         return true;
@@ -213,15 +278,6 @@ public class MainhandModule extends Module {
             m.setAccessible(true);
             m.invoke(mc.interactionManager);
         } catch (Exception ignored) {}
-    }
-
-    private int findHotbarTotemForMainhand() {
-        if (mc.player == null) return -1;
-        int current = mc.player.getInventory().getSelectedSlot();
-        for (int i = 0; i < 9; ++i) {
-            if (i != current && mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i;
-        }
-        return -1;
     }
 
     private int findGappleHotbar() {
