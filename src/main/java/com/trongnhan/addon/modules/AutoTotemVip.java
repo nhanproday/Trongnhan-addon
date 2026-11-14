@@ -725,8 +725,6 @@ public class AutoTotemVip extends Module {
             return serverSlot == slot;
         }
 
-        private boolean swapHotbarItemToOffhandInternal(int hotbarSlot, long token) { return false; }
-
         private boolean claimCleanExternalInventoryEpochInternal() {
             if (!packetWindowClean || externalEpochReserved || externalPlacementActive || !externalActionAvailable()) return false;
             externalEpochReserved = true;
@@ -795,3 +793,64 @@ public class AutoTotemVip extends Module {
                 || packet instanceof PlayerInteractEntityC2SPacket
                 || packet instanceof PlayerActionC2SPacket
                 || packet instanceof PickItemFromBlockC2SPacket
+                || packet instanceof PickItemFromEntityC2SPacket
+                || packet instanceof HandSwingC2SPacket;
+        }
+
+        private static boolean isPacketOrderConflict(Object packet) {
+            return packet instanceof PlayerInteractItemC2SPacket
+                || packet instanceof PlayerInteractBlockC2SPacket
+                || packet instanceof PlayerInteractEntityC2SPacket
+                || packet instanceof PlayerActionC2SPacket
+                || packet instanceof ClickSlotC2SPacket
+                || packet instanceof PickItemFromBlockC2SPacket
+                || packet instanceof PickItemFromEntityC2SPacket
+                || packet instanceof ClientCommandC2SPacket
+                || packet instanceof ClientStatusC2SPacket;
+        }
+
+        private void dispatch(int eventKind, Object event) {
+            switch (eventKind) {
+                case EVENT_TICK_PRE_EARLY -> onTickPreEarly();
+                case EVENT_TICK_PRE_LATE -> onTickPreLate();
+                case EVENT_PACKET_SEND -> onPacketSend((PacketEvent.Send) event);
+                case EVENT_PACKET_SENT -> onPacketSent((PacketEvent.Sent) event);
+                case EVENT_PACKET_RECEIVE -> onPacketReceive((PacketEvent.Receive) event);
+                case EVENT_MOVEMENT_POST -> onMovementPacketsPost();
+                case EVENT_ATTACK -> cancelAttack((DoAttackEvent) event);
+                case EVENT_USE -> cancelUse((DoItemUseEvent) event);
+                case EVENT_BREAK -> cancelBreak((StartBreakingBlockEvent) event);
+                case EVENT_JOIN -> initializeConnectionState();
+                case EVENT_LEFT -> resetConnectionState();
+                default -> throw new IllegalStateException("Unknown combat coordinator event " + eventKind);
+            }
+        }
+
+        public interface Participant {
+            Intent prepareCombatIntent();
+            void suspendForItemUse();
+            default boolean canFollowEmergencyOffhandSwap() { return false; }
+            default int combatPriority() { return 0; }
+        }
+
+        public interface Intent {
+            Participant owner();
+            void execute();
+        }
+
+        private final class CoordinatorListener implements IListener {
+            private final Class<?> target;
+            private final int priority;
+            private final int eventKind;
+            private CoordinatorListener(Class<?> target, int priority, int eventKind) {
+                this.target = target;
+                this.priority = priority;
+                this.eventKind = eventKind;
+            }
+            @Override public void call(Object event) { dispatch(eventKind, event); }
+            @Override public Class<?> getTarget() { return target; }
+            @Override public int getPriority() { return priority; }
+            @Override public boolean isStatic() { return false; }
+        }
+    }
+}
