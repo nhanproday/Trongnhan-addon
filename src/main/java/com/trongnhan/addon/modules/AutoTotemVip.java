@@ -653,7 +653,14 @@ public class AutoTotemVip extends Module {
         private void markActionSent() {
             actionTakenThisEpoch = true;
             Participant actionOwner = executingParticipant;
-            if (actionOwner != null) preferredParticipant = nextParticipant(actionOwner);
+            if (actionOwner != null) {
+                Participant best = null;
+                for (Participant participant : activeParticipants) {
+                    if (participant == actionOwner) continue;
+                    if (best == null || participant.combatPriority() > best.combatPriority()) best = participant;
+                }
+                preferredParticipant = (best == null && activeParticipants.contains(actionOwner)) ? actionOwner : best;
+            }
         }
 
         private void onPacketReceive(PacketEvent.Receive event) {
