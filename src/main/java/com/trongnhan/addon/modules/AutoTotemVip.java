@@ -142,7 +142,7 @@ public class AutoTotemVip extends Module {
             if (mc.player.isSneaking()) {
                 wasSneaking = true;
                 mc.player.setSneaking(false);
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.RELEASE_SHIFT_KEY));
+                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SNEAKING));
             }
         }
     }
@@ -179,7 +179,7 @@ public class AutoTotemVip extends Module {
                 cooldown = delay.get();
                 if (wasSneaking) {
                     mc.player.setSneaking(true);
-                    mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY));
+                    mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SNEAKING));
                     wasSneaking = false;
                 }
                 return;
@@ -198,7 +198,7 @@ public class AutoTotemVip extends Module {
             restoreNeutralInput();
             if (wasSneaking) {
                 mc.player.setSneaking(true);
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.PRESS_SHIFT_KEY));
+                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SNEAKING));
                 wasSneaking = false;
             }
             return;
