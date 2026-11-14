@@ -14,7 +14,6 @@ import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
@@ -142,7 +141,6 @@ public class AutoTotemVip extends Module {
             if (mc.player.isSneaking()) {
                 wasSneaking = true;
                 mc.player.setSneaking(false);
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SNEAKING));
             }
         }
     }
@@ -179,7 +177,6 @@ public class AutoTotemVip extends Module {
                 cooldown = delay.get();
                 if (wasSneaking) {
                     mc.player.setSneaking(true);
-                    mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SNEAKING));
                     wasSneaking = false;
                 }
                 return;
@@ -198,7 +195,6 @@ public class AutoTotemVip extends Module {
             restoreNeutralInput();
             if (wasSneaking) {
                 mc.player.setSneaking(true);
-                mc.getNetworkHandler().sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.START_SNEAKING));
                 wasSneaking = false;
             }
             return;
