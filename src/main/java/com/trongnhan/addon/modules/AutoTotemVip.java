@@ -862,36 +862,4 @@ public class AutoTotemVip extends Module {
                 case EVENT_USE -> cancelUse((DoItemUseEvent) event);
                 case EVENT_BREAK -> cancelBreak((StartBreakingBlockEvent) event);
                 case EVENT_JOIN -> initializeConnectionState();
-                case EVENT_LEFT -> resetConnectionState();
-                default -> throw new IllegalStateException("Unknown combat coordinator event " + eventKind);
-            }
-        }
-
-        public interface Participant {
-            Intent prepareCombatIntent();
-            void suspendForItemUse();
-            default boolean canFollowEmergencyOffhandSwap() { return false; }
-            default int combatPriority() { return 0; }
-        }
-
-        public interface Intent {
-            Participant owner();
-            void execute();
-        }
-
-        private final class CoordinatorListener implements IListener {
-            private final Class<?> target;
-            private final int priority;
-            private final int eventKind;
-            private CoordinatorListener(Class<?> target, int priority, int eventKind) {
-                this.target = target;
-                this.priority = priority;
-                this.eventKind = eventKind;
-            }
-            @Override public void call(Object event) { dispatch(eventKind, event); }
-            @Override public Class<?> getTarget() { return target; }
-            @Override public int getPriority() { return priority; }
-            @Override public boolean isStatic() { return false; }
-        }
-    }
-}2
+                case EVENT
